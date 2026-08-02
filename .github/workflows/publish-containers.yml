@@ -1,0 +1,164 @@
+name: Publish container images to GHCR
+
+# CD (entrega continua), no CI — ver spec-native/pipelines/CD.md.
+# Fase 4 del plan de distribución (DEC-0060/0061/0062 fases 1-3): publica
+# las 3 imágenes de contenedor del core (Atlas, Navigator, portal-chat) a
+# GitHub Container Registry, multi-arch (linux/amd64 + linux/arm64 — la
+# topología real de este proyecto ya usa hardware ARM, ver
+# docs/despliegue-multi-host.md y raspi4b-lan).
+#
+# Build nativo por arquitectura (runners `ubuntu-24.04-arm` hospedados por
+# GitHub para arm64), no QEMU: emular arm64 en un runner amd64 es más lento
+# y, para atlas (better-sqlite3, binding nativo compilado en el build), un
+# riesgo extra de correctitud que un build nativo no tiene. Patrón oficial
+# de Docker para esto ("build en runners separados, fusionar por digest"):
+# cada combinación app×arquitectura se construye y pushea por digest
+# (sin tag todavía) en su runner nativo; un job aparte fusiona los dos
+# digests de cada app en una sola manifest list con `docker buildx
+# imagetools create`, que es donde se asignan los tags finales.
+#
+# A diferencia de publish-packages.yml (que publica en cada push a main),
+# las imágenes de contenedor solo se cortan en un release explícito (tag
+# v*) — construir y subir 3 imágenes multi-arch en cada commit saturaría
+# GHCR sin necesidad; un release es la unidad natural de "esta es la
+# versión que alguien va a desplegar".
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag a publicar (ej. v0.1.0-beta.1) — vacío = solo :latest"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-containers-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - atlas
+          - navigator
+          - portal-chat
+        platform:
+          - linux/amd64
+          - linux/arm64
+        include:
+          - app: atlas
+            containerfile: containers/atlas/Containerfile
+          - app: navigator
+            containerfile: containers/navigator/Containerfile
+          - app: portal-chat
+            containerfile: containers/portal-chat/Containerfile
+    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Preparar nombre de plataforma para el artifact
+        run: |
+          platform="${{ matrix.platform }}"
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login a GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push ${{ matrix.app }} (${{ matrix.platform }}) por digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.containerfile }}
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            COMMIT_HASH=${{ github.sha }}
+            BUILD_DATE=${{ github.run_started_at }}
+          # Sin tag todavía — cada plataforma se pushea por digest, el job
+          # `merge` arma la manifest list con los tags finales (:latest/:<tag>).
+          outputs: type=image,name=ghcr.io/rafex/galaxia-${{ matrix.app }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Exportar digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Subir digest como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.app }}-${{ env.PLATFORM_PAIR }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    needs: build
+    strategy:
+      matrix:
+        app:
+          - atlas
+          - navigator
+          - portal-chat
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar digests de ${{ matrix.app }}
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-${{ matrix.app }}-*
+          merge-multiple: true
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login a GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determinar tags de la imagen
+        id: tag
+        run: |
+          IMAGE="ghcr.io/rafex/galaxia-${{ matrix.app }}"
+          if [ -n "${{ inputs.tag }}" ]; then
+            VERSION="${{ inputs.tag }}"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            VERSION=""
+          fi
+
+          TAGS="-t $IMAGE:latest"
+          if [ -n "$VERSION" ]; then
+            TAGS="$TAGS -t $IMAGE:$VERSION"
+          fi
+          echo "value=$TAGS" >> "$GITHUB_OUTPUT"
+
+      - name: Crear manifest list multi-arch y publicar
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create ${{ steps.tag.outputs.value }} \
+            $(printf 'ghcr.io/rafex/galaxia-${{ matrix.app }}@sha256:%s ' *)
+
+      - name: Verificar manifest publicado
+        run: docker buildx imagetools inspect ghcr.io/rafex/galaxia-${{ matrix.app }}:latest

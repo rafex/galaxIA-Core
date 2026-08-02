@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1
+# Contenedor del OCR Provider FHS
+# Recubre un servicio OCR HTTP externo con el protocolo FHS WebSocket.
+# Expone tools FHS en puerto 43112.
+#
+# @rafex/galaxia-fhs-protocol se instala desde GitHub Packages (requiere
+# autenticación incluso para paquetes públicos). El token se pasa como
+# secret de BuildKit (nunca queda en una capa de la imagen ni en el
+# historial): construir con
+#   DOCKER_BUILDKIT=1 docker build --secret id=gh_token,env=GH_TOKEN -f containers/satellite-ocr/Containerfile .
+# o con podman (>=4):
+#   podman build --secret id=gh_token,env=GH_TOKEN -f containers/satellite-ocr/Containerfile .
+
+FROM docker.io/library/node:20-alpine AS builder
+WORKDIR /app
+
+COPY package*.json .npmrc ./
+COPY examples/satellite-ocr-example/package.json ./examples/satellite-ocr-example/
+
+RUN --mount=type=secret,id=gh_token \
+    export GH_TOKEN="$(cat /run/secrets/gh_token)" && npm ci
+
+COPY examples/satellite-ocr-example ./examples/satellite-ocr-example
+
+RUN npm run build -w examples/satellite-ocr-example
+
+FROM docker.io/library/node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+
+RUN apk add --no-cache curl
+
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/examples/satellite-ocr-example/package.json ./examples/satellite-ocr-example/
+COPY --from=builder /app/examples/satellite-ocr-example/dist ./examples/satellite-ocr-example/dist
+
+WORKDIR /app/examples/satellite-ocr-example
+EXPOSE 43112
+
+ENV OCR_PROVIDER_PORT=43112
+ENV OCR_PROVIDER_HOST=satellite-ocr
+ENV REGISTRY_URL=ws://atlas:8081/fhs/v1/ws
+ENV OCR_SERVICE_URL=http://ether-ocr-api:8000
+ENV OCR_API_KEY=dev-key-ether-ocr
+ENV PROVIDER_ID=did:key:ocr-provider-01
+ENV PROVIDER_NAME="OCR FHS Provider"
+
+CMD ["node", "dist/index.js"]

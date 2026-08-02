@@ -1,0 +1,1 @@
+{"name": "ocr_extract", "arguments": {"imageUrl": "https://example.com/scan.png"}}

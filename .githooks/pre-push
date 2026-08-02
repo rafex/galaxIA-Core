@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# pre-push — verifica build, tests y tarballs de los paquetes distribuibles antes de push
+# fhs-protocol migró a galaxIA-SDK (2026-08-02, DEC-0085) — ya no se verifica aquí.
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+echo "→ Build completo..."
+npm run build --workspaces --prefix "$ROOT"
+
+echo "→ Tests..."
+npm run test --workspaces --prefix "$ROOT"
+
+echo "→ Verificando tarballs de los paquetes distribuibles..."
+"$ROOT/helpers/shell/verify-package.sh" apps/atlas
+"$ROOT/helpers/shell/verify-package.sh" apps/navigator
+"$ROOT/helpers/shell/verify-package.sh" apps/portal-chat
+
+echo "✓ pre-push OK"

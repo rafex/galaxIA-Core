@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# commit-msg — valida formato Conventional Commits
+set -euo pipefail
+
+MSG_FILE="$1"
+MSG="$(cat "$MSG_FILE")"
+
+# Permitir merge commits de git
+if echo "$MSG" | head -1 | grep -qE '^Merge '; then
+  exit 0
+fi
+
+# Validar formato: type(scope): message o type: message
+if echo "$MSG" | head -1 | grep -qE '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?!?: .+'; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+✗ Mensaje de commit no sigue Conventional Commits.
+
+  Formato esperado: tipo[(scope)]: descripción
+  Tipos válidos: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+
+  Ejemplos:
+    feat: agregar ESLint y tests al monorepo
+    fix(ws-handler): corregir validación de timestamp en hello
+    docs: actualizar README con instrucciones de githooks
+
+  Tu mensaje:
+    $(echo "$MSG" | head -1)
+
+Para saltar esta validación: git commit --no-verify
+EOF
+exit 1

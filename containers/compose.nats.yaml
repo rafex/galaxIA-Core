@@ -1,0 +1,36 @@
+# Overlay opcional para activar el puente de eventos Atlas↔Navigator vía
+# NATS (SPEC-BRIDGE-0001, DEC-0074). No modifica containers/compose.yaml —
+# se usa junto a él. Sin este overlay, el stack funciona exactamente igual
+# que hoy: el chat nunca dependió de esto (AgentRuntime resuelve el catálogo
+# en vivo por REST en cada turno). Lo único que gana el Portal con esto son
+# notificaciones en vivo de altas/bajas de nodos, en vez de solo verlas en
+# la siguiente consulta puntual a /api/fhs/providers.
+#
+# Uso:
+#   podman-compose -f containers/compose.yaml -f containers/compose.nats.yaml up -d --build
+#
+# NATS core (pub/sub simple, sin JetStream) — suficiente porque esto nunca
+# fue una dependencia funcional del pipeline de chat, solo una mejora de
+# experiencia. Si Navigator se reinicia mientras NATS está activo, no hay
+# replay de lo que se perdió — el catálogo sigue siendo correcto porque cada
+# turno de chat lo vuelve a resolver por REST, independientemente de NATS.
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    container_name: fhs-nats
+    networks:
+      - fhs
+    restart: unless-stopped
+
+  atlas:
+    environment:
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      - nats
+
+  navigator:
+    environment:
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      - nats

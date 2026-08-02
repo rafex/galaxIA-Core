@@ -1,0 +1,34 @@
+{
+  "name": "@rafex/galaxia-parser-catalog",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Catálogo comunitario de perfiles de parseo tolerante para respuestas de modelos LLM (referenciado por ModelParserProfile en @rafex/galaxia-fhs-protocol, SPEC-PARSER-0001).",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "profiles",
+    "schema.sql",
+    "catalog.sqlite"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "build-db": "tsx src/build-db.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx tests/match.test.ts"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "tsx": "^4.15.0",
+    "typescript": "^5.5.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rafex/galaxia-parser-catalog.git"
+  },
+  "license": "MIT"
+}

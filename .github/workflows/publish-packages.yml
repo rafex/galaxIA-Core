@@ -1,0 +1,213 @@
+name: Publish packages to GitHub Packages + npmjs.org
+
+# CD (entrega continua), no CI — ver spec-native/pipelines/CD.md.
+# Publica los 3 paquetes distribuibles del monorepo a GitHub Packages y a
+# npmjs.org en cada push a main que toque alguno: @rafex/galaxia-atlas,
+# @rafex/galaxia-navigator, @rafex/galaxia-portal-chat
+# (DEC-0061/DEC-0066, fases 2 y 6 del plan de distribución).
+# @rafex/galaxia-fhs-protocol migró a galaxIA-SDK (2026-08-02, DEC-0085).
+#
+# Automatización (DEC-0041, ver helpers/shell y helpers/python):
+# - Si la versión en package.json ya está publicada (en GitHub Packages —
+#   fuente de verdad para el bump, npmjs.org sigue la misma versión), el
+#   propio workflow la sube automáticamente
+#   (helpers/python/bump_package_version.py) y commitea el bump de vuelta
+#   a main — ya no depende de que quien mergea se acuerde de subir el
+#   número a mano.
+# - Antes de publicar, verifica que el tarball incluya dist/ compilado
+#   (helpers/shell/verify-package.sh) — la versión 0.1.0 de fhs-protocol se
+#   publicó rota por esto exacto (ver DEC-0040), este chequeo evita que se
+#   repita en cualquiera de los 3 paquetes.
+# - npmjs.org requiere --access public explícito la primera vez que se
+#   publica un paquete con scope (@rafex/*) — por default los
+#   paquetes con scope se asumen privados (requiere una org de pago), y
+#   estos 3 nombres están libres en npmjs.org (verificado antes de activar
+#   esto, DEC-0066).
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "apps/atlas/**"
+      - "apps/navigator/**"
+      - "apps/portal-chat/**"
+      - ".github/workflows/publish-packages.yml"
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Paquete a publicar (`all` = los 3)"
+        type: choice
+        options:
+          - all
+          - apps/atlas
+          - apps/navigator
+          - apps/portal-chat
+        default: all
+
+permissions:
+  contents: write
+  packages: write
+
+# Evita que dos runs concurrentes (ej. un push que toca este workflow +
+# un workflow_dispatch manual casi simultáneo) compitan por el mismo push
+# del commit de bump de versión — visto en vivo el 2026-07-06 con el
+# workflow original de un solo paquete: el segundo run perdía la carrera
+# con "! [rejected] main -> main (fetch first)". Un solo job secuencial
+# (no matriz) evita el mismo problema entre los 3 paquetes de este push.
+concurrency:
+  group: publish-packages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Necesario para poder pushear el commit de bump de vuelta a main,
+          # y para poder diffear contra el commit anterior (github.event.before)
+          # aunque sea un push por lotes de varios commits — 0 trae toda la
+          # historia, evitando que ese commit quede fuera de un checkout
+          # superficial.
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://npm.pkg.github.com"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Instalar jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Instalar dependencias del workspace
+        run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determinar qué paquetes cambiaron
+        id: changed
+        run: |
+          ALL="apps/atlas apps/navigator apps/portal-chat"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.package }}" != "all" ]; then
+            TO_PROCESS="${{ inputs.package }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TO_PROCESS="$ALL"
+          else
+            BEFORE="${{ github.event.before }}"
+            # BEFORE es todo ceros en el primer push de una rama nueva (no hay
+            # commit anterior real que diffear) — en ese caso, procesar los 4
+            # es la opción segura (peor caso: un bump/verify de más, nunca de
+            # menos).
+            if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE" 2>/dev/null; then
+              TO_PROCESS="$ALL"
+            else
+              CHANGED_FILES=$(git diff --name-only "$BEFORE" "${{ github.sha }}")
+              TO_PROCESS=""
+              for pkg in $ALL; do
+                if echo "$CHANGED_FILES" | grep -q "^$pkg/"; then
+                  TO_PROCESS="$TO_PROCESS $pkg"
+                fi
+              done
+            fi
+          fi
+          echo "Paquetes a procesar:$TO_PROCESS"
+          echo "packages=$TO_PROCESS" >> "$GITHUB_OUTPUT"
+
+      - name: Bump, verificar y publicar cada paquete cambiado
+        if: steps.changed.outputs.packages != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Además del registro de GitHub Packages ya configurado por
+          # actions/setup-node (registry-url), habilita auth para
+          # registry.npmjs.org. OJO: setup-node apunta NPM_CONFIG_USERCONFIG
+          # a su propio .npmrc temporal — escribir en ~/.npmrc sería
+          # invisible para npm (DEC-0070, addendum 3).
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+
+          for pkg in ${{ steps.changed.outputs.packages }}; do
+            echo "::group::$pkg"
+
+            echo "→ Bump de versión si ya está publicada..."
+            case "$pkg" in
+              apps/atlas) TARGET="atlas" ;;
+              apps/navigator) TARGET="navigator" ;;
+              apps/portal-chat) TARGET="portal-chat" ;;
+              *) echo "Workspace no soportado: $pkg" >&2; exit 1 ;;
+            esac
+            make "${TARGET}-bump"
+
+            if ! git diff --quiet -- "$pkg/package.json" package-lock.json; then
+              git add "$pkg/package.json" package-lock.json
+              PKG_NAME=$(node -p "require('./${pkg}/package.json').name")
+              git commit -m "chore: bump ${PKG_NAME} version [skip ci]"
+              git push
+            else
+              echo "Sin cambios de versión — nada que commitear."
+            fi
+
+            echo "→ Verificando contenido del paquete..."
+            make "${TARGET}-verify"
+
+            echo "→ Publicando a GitHub Packages..."
+            npm publish -w "$pkg" --registry https://npm.pkg.github.com
+
+            echo "→ Publicando a npmjs.org..."
+            # Dos trampas de npm 10 encontradas en runs reales (DEC-0070):
+            # 1) publishConfig.registry pisa el --registry de la CLI (run
+            #    29100658504), y 2) `npm publish -w` ignora incluso el
+            #    publishConfig reescrito del workspace (run 29138370429 — el
+            #    fix de `npm pkg set` solo no bastó). Solución a prueba de
+            #    versiones: reescribir publishConfig Y publicar parado dentro
+            #    del paquete, sin -w, con el flag explícito — los tres
+            #    mecanismos apuntan a npmjs. Se verifica en el propio log de
+            #    npm a qué registro fue, para fallar rápido y claro si npm
+            #    vuelve a cambiar de opinión.
+            # La config que de verdad manda aquí es la POR SCOPE: setup-node
+            # con registry-url de GitHub Packages escribe
+            # `@rafex:registry=https://npm.pkg.github.com` en su .npmrc, y en
+            # npm la config de scope le gana al --registry genérico y al
+            # publishConfig.registry (run 29138772605: publishConfig ya era
+            # npmjs y aun así publicó a GH). Se sobreescribe el registro del
+            # scope en las tres capas: package.json (jq), publishConfig y
+            # flag de CLI por scope.
+            # En npmjs el scope del usuario es @rafex_labs (@rafex pertenece
+            # a otro usuario), mientras GitHub Packages EXIGE @rafex (owner
+            # del repo) — cada registro lleva su scope (DEC-0071): se
+            # renombra el paquete al vuelo y se reescribe la dependencia
+            # interna del protocolo para que `npm install` desde npmjs
+            # resuelva dentro del mismo registro.
+            NPMJS_NAME=$(jq -r .name "$pkg/package.json" | sed 's|^@rafex/|@rafex_labs/|')
+            jq --arg n "$NPMJS_NAME" '
+              .name = $n
+              | .publishConfig = {"registry": "https://registry.npmjs.org", "@rafex_labs:registry": "https://registry.npmjs.org"}
+              | (if (.dependencies // {}) | has("@rafex/galaxia-fhs-protocol") then
+                   .dependencies["@rafex_labs/galaxia-fhs-protocol"] = .dependencies["@rafex/galaxia-fhs-protocol"]
+                   | del(.dependencies["@rafex/galaxia-fhs-protocol"])
+                 else . end)
+            ' "$pkg/package.json" > /tmp/pkg.json && mv /tmp/pkg.json "$pkg/package.json"
+            echo "npmjs name: $NPMJS_NAME — publishConfig: $(jq -c .publishConfig "$pkg/package.json")"
+            # Userconfig limpio SOLO para este publish: el .npmrc temporal de
+            # setup-node siguió interfiriendo incluso con el token añadido
+            # (ENEEDAUTH, run 29138983772) — reemplazarlo entero por uno que
+            # solo conoce npmjs elimina todas sus capas de una vez.
+            printf '//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" > /tmp/npmjs-userconfig
+            (cd "$pkg" && set -o pipefail && NPM_CONFIG_USERCONFIG=/tmp/npmjs-userconfig npm publish --registry https://registry.npmjs.org --access public 2>&1 | tee /tmp/npmjs-publish.log)
+            if ! grep -q "Publishing to https://registry.npmjs.org" /tmp/npmjs-publish.log; then
+              echo "::error::El publish a npmjs.org fue a otro registro — ver log arriba" >&2
+              exit 1
+            fi
+            git checkout -- "$pkg/package.json"
+            echo "::endgroup::"
+          done

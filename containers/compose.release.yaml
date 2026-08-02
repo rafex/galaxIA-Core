@@ -1,0 +1,76 @@
+# galaxIA — Docker Compose de release: usa las imágenes publicadas en GHCR
+# (ghcr.io/rafex/galaxia-*) en vez de construirlas localmente. Pensado para
+# correr sin clonar el repo — solo hacen falta este archivo y `.env`
+# (copiar desde `.env.example`, ver docs/instalacion.md).
+#
+# Diferencia con compose.yaml (para desarrollo/contribuir, en el repo): ese
+# usa `build:` contra el código fuente local; este usa `image:` contra una
+# versión ya publicada — mismo stack, canal de distribución distinto (ver
+# spec-native/DECISIONS.md DEC-0060 a DEC-0063).
+#
+# Uso:
+#   REF=main  # o: v0.1.0-alpha.1 (para una release reproducible)
+#   curl -O https://raw.githubusercontent.com/rafex/galaxIA/${REF}/containers/compose.release.yaml
+#   curl -O https://raw.githubusercontent.com/rafex/galaxIA/${REF}/containers/.env.example
+#   cp .env.example .env   # y editar según docs/instalacion.md
+#   podman-compose -f compose.release.yaml up -d
+#
+# Para un despliegue multi-host (Atlas/Navigator/Portal en máquinas
+# distintas), no se usa este archivo tal cual en las tres — se corre cada
+# servicio por separado (`podman run` directo, o un compose de un solo
+# servicio) en su propia máquina, con ATLAS_URL/NAVIGATOR_URL apuntando a
+# la IP real de las otras — ver docs/instalacion.md.
+
+services:
+  atlas:
+    image: ghcr.io/rafex/galaxia-atlas:${GALAXIA_VERSION:-latest}
+    container_name: fhs-atlas
+    ports:
+      - "${ATLAS_PORT:-30083}:8081"
+    environment:
+      - PORT=8081
+      - HOST=0.0.0.0
+    volumes:
+      - atlas-data:/app/apps/atlas/data
+    networks:
+      - fhs
+    restart: unless-stopped
+
+  navigator:
+    image: ghcr.io/rafex/galaxia-navigator:${GALAXIA_VERSION:-latest}
+    container_name: fhs-navigator
+    environment:
+      - PORT=8090
+      - HOST=0.0.0.0
+      - ATLAS_URL=http://atlas:8081
+    depends_on:
+      - atlas
+    networks:
+      - fhs
+    restart: unless-stopped
+
+  portal-chat:
+    image: ghcr.io/rafex/galaxia-portal-chat:${GALAXIA_VERSION:-latest}
+    container_name: fhs-portal-chat
+    ports:
+      - "${PORTAL_PORT:-3000}:80"
+    # Defaults para un solo host (DNS del compose: atlas/navigator). Para
+    # multi-host, corre Portal-chat por separado (sin este compose completo) y
+    # setea ATLAS_URL/NAVIGATOR_URL a las IPs reales — ver docs/instalacion.md.
+    environment:
+      - ATLAS_URL=${ATLAS_URL:-http://atlas:8081}
+      - NAVIGATOR_URL=${NAVIGATOR_URL:-http://navigator:8090}
+    depends_on:
+      - navigator
+      - atlas
+    networks:
+      - fhs
+    restart: unless-stopped
+
+networks:
+  fhs:
+    name: fhs
+    driver: bridge
+
+volumes:
+  atlas-data:

@@ -1,0 +1,50 @@
+# Contenedor del frontend FHS Chat Web
+# Sirve la aplicación compilada con Nginx y proxya /api al navigator.
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+ARG COMMIT_HASH=unknown
+ARG BUILD_DATE=unknown
+
+COPY package*.json ./
+COPY packages/fhs-protocol/package.json ./packages/fhs-protocol/
+COPY apps/navigator/package.json ./apps/navigator/
+COPY apps/portal-chat/package.json ./apps/portal-chat/
+
+RUN npm ci
+
+COPY packages/fhs-protocol ./packages/fhs-protocol
+COPY apps/portal-chat ./apps/portal-chat
+
+# Generar version.json para el frontend
+RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
+      > apps/portal-chat/public/version.json
+
+RUN npm run build -w packages/fhs-protocol && \
+    npm run build -w apps/portal-chat
+
+FROM docker.io/library/nginx:alpine
+COPY --from=builder /app/apps/portal-chat/dist /usr/share/nginx/html
+
+# La imagen base trae su propio /etc/nginx/conf.d/default.conf (página de
+# bienvenida) — sin borrarlo, compite por el puerto 80 con el nuestro
+# ("conflicting server name localhost on 0.0.0.0:80", visto en pruebas
+# reales) y cuál gana queda indefinido.
+RUN rm -f /etc/nginx/conf.d/default.conf
+
+# Template (no un nginx.conf final): la imagen base corre `envsubst` sobre
+# /etc/nginx/templates/*.template al arrancar, sustituyendo ATLAS_URL/
+# NAVIGATOR_URL — así Atlas/Navigator pueden vivir en otra máquina sin
+# reconstruir esta imagen (ver comentario en nginx.conf.template).
+COPY containers/portal-chat/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+
+# Defaults para el caso de un solo host (mismo comportamiento de siempre);
+# sobreescribir con -e ATLAS_URL=http://<ip>:8081 -e NAVIGATOR_URL=http://<ip>:8090
+# para un despliegue real de dos o más máquinas.
+ENV ATLAS_URL=http://atlas:8081
+ENV NAVIGATOR_URL=http://navigator:8090
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

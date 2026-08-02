@@ -1,0 +1,37 @@
+# Dependencias
+node_modules/
+
+# Artefactos de build
+dist/
+*.tsbuildinfo
+
+# Entorno local (contiene paths, puertos, tokens)
+.env
+.env.local
+.env.*.local
+
+# Certificados TLS autofirmados — se generan por máquina, nunca se versionan
+/certs/
+
+# Identidad Ed25519 por nodo (DEC-0030) — clave privada, nunca se versiona
+.fhs-identity*.pem
+
+# Rating de Atlas (SQLite local)
+apps/atlas/data/
+*.db-wal
+*.db-shm
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Logs
+*.log
+/tmp/
+
+/data/

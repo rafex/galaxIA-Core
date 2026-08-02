@@ -1,0 +1,54 @@
+# Contenedor de Atlas (Registry) FHS v0.1
+# Expone el WebSocket de registro (/fhs/v1/ws) y la API REST del catálogo
+# (/api/fhs/*) en el puerto 8081.
+
+FROM docker.io/library/node:20-alpine AS builder
+WORKDIR /app
+
+ARG COMMIT_HASH=unknown
+ARG BUILD_DATE=unknown
+
+# better-sqlite3 (SPEC-SATRATING-0001) es un binding nativo — necesita estas
+# herramientas para compilar si no hay un prebuild para musl/Alpine. Mismo
+# base image en builder y en la imagen final, así el binario compilado es
+# compatible entre ambos stages.
+RUN apk add --no-cache python3 make g++
+
+# Copiar metadatos del workspace
+COPY package*.json ./
+COPY packages/fhs-protocol/package.json ./packages/fhs-protocol/
+COPY apps/atlas/package.json ./apps/atlas/
+
+# Instalar dependencias de producción/desarrollo
+RUN npm ci
+
+# Copiar código fuente y construir
+COPY packages/fhs-protocol ./packages/fhs-protocol
+COPY apps/atlas ./apps/atlas
+
+# Generar version.json
+RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
+      > apps/atlas/src/version.json
+
+RUN npm run build -w packages/fhs-protocol && \
+    npm run build -w apps/atlas
+
+# Imagen final mínima
+FROM docker.io/library/node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=8081
+ENV HOST=0.0.0.0
+ENV ATLAS_DB_PATH=/app/apps/atlas/data/atlas-metrics.db
+
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/fhs-protocol/package.json ./packages/fhs-protocol/
+COPY --from=builder /app/packages/fhs-protocol/dist ./packages/fhs-protocol/dist
+COPY --from=builder /app/apps/atlas/package.json ./apps/atlas/
+COPY --from=builder /app/apps/atlas/dist ./apps/atlas/dist
+
+WORKDIR /app/apps/atlas
+EXPOSE 8081
+
+CMD ["node", "dist/index.js"]

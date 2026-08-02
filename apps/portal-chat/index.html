@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FHS — Chat Comunitario</title>
+    <script>
+      // Setea data-theme antes del primer paint para evitar un flash del
+      // tema equivocado — ver src/services/theme.ts (misma lógica, en
+      // paralelo porque este script debe ser síncrono e inline).
+      (function () {
+        try {
+          var stored = localStorage.getItem("galaxia-theme");
+          var theme =
+            stored === "light" || stored === "dark" || stored === "high-contrast"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

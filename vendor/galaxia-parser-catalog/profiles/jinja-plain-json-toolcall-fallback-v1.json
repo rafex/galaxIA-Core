@@ -1,0 +1,12 @@
+{
+  "id": "jinja-plain-json-toolcall-fallback-v1",
+  "modelPattern": "^qwen2\\.5-coder.*$",
+  "strategy": "plain-json-in-content",
+  "rule": {
+    "stripCodeFences": true,
+    "mustStartWith": "{",
+    "validateNameAgainst": "requestedTools[].function.name"
+  },
+  "notes": "qwen2.5-coder-3b-instruct servido con llama-server --jinja a veces decide invocar una tool correctamente pero escribe el JSON de la llamada como texto plano en `content` en vez de llenar el campo estructurado `tool_calls`. Sin este perfil, la llamada a la tool nunca se ejecuta aunque el modelo sí haya decidido usarla.",
+  "sourceIncident": "https://github.com/rafex/galaxIA/blob/main/spec-native/DECISIONS.md#dec-0016"
+}

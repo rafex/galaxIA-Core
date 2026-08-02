@@ -1,0 +1,33 @@
+# Contenedor de log-agent en modo collect (DEC-0083) — se suscribe a NATS
+# (logs.>) y agrega en /app/logs/all.log lo que publican los shippers de
+# cada host (helpers/scripts/shell/log-agent-ship.sh, ese sí corre en el
+# host directo, no containerizado — necesita `podman logs -f` de
+# contenedores hermanos). Este contenedor no tiene esa necesidad: solo
+# habla NATS, así que containerizarlo no tiene la misma fricción.
+
+FROM docker.io/library/node:20-alpine AS builder
+WORKDIR /app
+
+COPY package*.json ./
+COPY apps/log-agent/package.json ./apps/log-agent/
+
+RUN npm ci
+
+COPY apps/log-agent ./apps/log-agent
+
+RUN npm run build -w apps/log-agent
+
+FROM docker.io/library/node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+ENV LOG_AGENT_LOCAL_DIR=/app/logs
+
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/log-agent/package.json ./apps/log-agent/
+COPY --from=builder /app/apps/log-agent/dist ./apps/log-agent/dist
+
+WORKDIR /app/apps/log-agent
+VOLUME ["/app/logs"]
+
+CMD ["node", "dist/index.js"]

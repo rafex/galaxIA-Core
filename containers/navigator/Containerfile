@@ -1,0 +1,47 @@
+# Contenedor de Navigator (Agent Runtime) FHS v0.1
+# Expone la API REST/WebSocket de chat en el puerto 8090. Habla con Atlas
+# por HTTP (ATLAS_URL) — ver apps/navigator/src/atlas-client.ts.
+
+FROM docker.io/library/node:20-alpine AS builder
+WORKDIR /app
+
+ARG COMMIT_HASH=unknown
+ARG BUILD_DATE=unknown
+
+# Copiar metadatos del workspace
+COPY package*.json ./
+COPY packages/fhs-protocol/package.json ./packages/fhs-protocol/
+COPY apps/navigator/package.json ./apps/navigator/
+
+# Instalar dependencias de producción/desarrollo
+RUN npm ci
+
+# Copiar código fuente y construir
+COPY packages/fhs-protocol ./packages/fhs-protocol
+COPY apps/navigator ./apps/navigator
+
+# Generar version.json
+RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
+      > apps/navigator/src/version.json
+
+RUN npm run build -w packages/fhs-protocol && \
+    npm run build -w apps/navigator
+
+# Imagen final mínima
+FROM docker.io/library/node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=8090
+ENV HOST=0.0.0.0
+
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/fhs-protocol/package.json ./packages/fhs-protocol/
+COPY --from=builder /app/packages/fhs-protocol/dist ./packages/fhs-protocol/dist
+COPY --from=builder /app/apps/navigator/package.json ./apps/navigator/
+COPY --from=builder /app/apps/navigator/dist ./apps/navigator/dist
+
+WORKDIR /app/apps/navigator
+EXPOSE 8090
+
+CMD ["node", "dist/index.js"]

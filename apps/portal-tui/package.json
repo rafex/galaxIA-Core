@@ -1,0 +1,24 @@
+{
+  "name": "@rafex/galaxia-portal-tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Portal de terminal (TUI) del cliente FHS v0.1 — estructura base, sin implementar todavía. Ver apps/portal-chat para el cliente web.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "sh ../../helpers/scripts/shell/gen-version.sh 2>/dev/null || true; tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@rafex/galaxia-fhs-protocol": "0.1.23"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "tsx": "4.22.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

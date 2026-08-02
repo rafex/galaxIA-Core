@@ -1,0 +1,37 @@
+{
+  "name": "galaxia-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FHS — Federation of Sovereign Horizons. Runtime core: Atlas, Navigator, Portal Chat, Portal TUI, Log Agent.",
+  "type": "module",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w apps/portal-chat",
+    "dev:agent": "npm run dev -w apps/navigator",
+    "build": "npm run build -w apps/atlas && npm run build -w apps/navigator && npm run build -w apps/portal-chat",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "npm run lint --workspaces && npm run lint:scripts",
+    "lint:scripts": "eslint scripts/",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1",
+    "@typescript-eslint/eslint-plugin": "8.63.0",
+    "@typescript-eslint/parser": "8.63.0",
+    "eslint": "10.6.0",
+    "tsx": "4.22.4",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.63.0",
+    "vitest": "4.1.10",
+    "ws": "8.21.0"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true
+  }
+}

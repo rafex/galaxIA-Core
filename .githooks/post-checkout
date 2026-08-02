@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# post-checkout — regenera .env y muestra grafo de dependencias al cambiar de rama
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+PREV_HEAD="$1"
+NEW_HEAD="$2"
+BRANCH_CHANGE="$3"
+
+# Solo ejecutar en cambio real de rama, no en checkout de archivos
+if [ "$BRANCH_CHANGE" != "1" ]; then
+  exit 0
+fi
+
+echo "→ Regenerando .env..."
+python3 "$ROOT/helpers/scripts/python/generate-env.py" --write
+
+echo "→ Grafo de dependencias del monorepo:"
+python3 "$ROOT/helpers/scripts/python/workspace-deps.py"
+
+echo "✓ post-checkout OK"

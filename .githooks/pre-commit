@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# pre-commit — ejecuta lint, typecheck y regenera version.json
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+echo "→ ESLint..."
+npm run lint --prefix "$ROOT"
+
+echo "→ Typecheck..."
+npm run typecheck --workspaces --prefix "$ROOT"
+
+echo "→ Regenerando version.json..."
+"$ROOT/helpers/scripts/shell/gen-version.sh"
+
+echo "✓ pre-commit OK"

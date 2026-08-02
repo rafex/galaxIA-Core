@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# post-merge — regenera .env y version.json después de merge
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+echo "→ Regenerando .env..."
+python3 "$ROOT/helpers/scripts/python/generate-env.py" --write
+
+echo "→ Regenerando version.json..."
+"$ROOT/helpers/scripts/shell/gen-version.sh"
+
+echo "✓ post-merge OK"

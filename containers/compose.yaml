@@ -1,0 +1,81 @@
+# galaxIA — Docker Compose del core del protocolo FHS: Atlas (Registry),
+# Navigator (Agent Runtime) y Portal (web chat).
+#
+# Los providers de referencia (Star/LLM, Satellite/OCR, RAG, KB) ya NO viven
+# en este repo — se separaron a `galaxIA-satellite-star`
+# (https://github.com/rafex/galaxIA-satellite-star), que tiene su propio
+# containers/compose.yaml. Levanta el core aquí y los providers allá,
+# apuntando PROVIDER_REGISTRY_URL a la URL pública de este Atlas
+# (ver docs/despliegue-multi-host.md).
+#
+# DEC-0035: Atlas (Registry) y Navigator (Agent Runtime) son servicios
+# separados desde esta versión — antes vivían en un solo proceso. Navigator
+# habla con Atlas por HTTP (ATLAS_URL); los providers externos se registran
+# directamente contra Atlas por WebSocket (REGISTRY_URL), sin cambios en su
+# protocolo.
+
+services:
+  atlas:
+    build:
+      context: ..
+      dockerfile: containers/atlas/Containerfile
+    container_name: fhs-atlas
+    # Mismo mapeo externo que tenía "navigator" antes de DEC-0035 — no hace
+    # falta abrir una regla UFW nueva en el bastion/laptop ya desplegados,
+    # Atlas hereda el puerto bien conocido.
+    ports:
+      - "30083:8081"
+    environment:
+      - PORT=8081
+      - HOST=0.0.0.0
+    # Volumen nombrado para que el rating (SQLite, SPEC-SATRATING-0001)
+    # sobreviva a `podman-compose down`/recrear el contenedor — sin esto el
+    # archivo vive en la capa efímera del contenedor y se pierde igual.
+    volumes:
+      - atlas-data:/app/apps/atlas/data
+    networks:
+      - fhs
+    restart: unless-stopped
+
+  navigator:
+    build:
+      context: ..
+      dockerfile: containers/navigator/Containerfile
+    container_name: fhs-navigator
+    environment:
+      - PORT=8090
+      - HOST=0.0.0.0
+      - ATLAS_URL=http://atlas:8081
+    depends_on:
+      - atlas
+    networks:
+      - fhs
+    restart: unless-stopped
+
+  portal-chat:
+    build:
+      context: ..
+      dockerfile: containers/portal-chat/Containerfile
+    container_name: fhs-portal-chat
+    ports:
+      - "3000:80"
+    # Defaults para un solo host (Docker DNS) — sobreescribir en un .env
+    # cuando Atlas/Navigator viven en otra máquina de la red (ver
+    # docs/despliegue-multi-host.md), ej. ATLAS_URL=http://192.168.1.50:8081.
+    environment:
+      - ATLAS_URL=${ATLAS_URL:-http://atlas:8081}
+      - NAVIGATOR_URL=${NAVIGATOR_URL:-http://navigator:8090}
+    depends_on:
+      - navigator
+      - atlas
+    networks:
+      - fhs
+    restart: unless-stopped
+
+networks:
+  fhs:
+    name: fhs
+    driver: bridge
+
+volumes:
+  atlas-data:
