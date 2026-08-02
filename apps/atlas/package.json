@@ -1,6 +1,6 @@
 {
   "name": "@rafex/galaxia-atlas",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": false,
   "type": "module",
   "description": "Atlas (Registry) de FHS v0.1: registro de nodos Star/Satellite, cat\u00e1logo de servicios y m\u00e9tricas de rating.",
