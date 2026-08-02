@@ -35,3 +35,6 @@ Thumbs.db
 /tmp/
 
 /data/
+
+# SpecNative — venv is generated; do not commit
+.specnative/.venv/
