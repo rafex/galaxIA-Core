@@ -11,24 +11,26 @@ import { EventBus } from "./sse/event-bus.js";
 import { connectNatsBridge } from "./nats-bridge.js";
 import { isIpfsConfigured, getPublicGatewayUrl } from "./ipfs/ipfs-client.js";
 import versionInfo from "./version.json" with { type: "json" };
+import { initP2pProviders } from "./p2p/index.js";
 
 const PORT = Number(process.env.PORT || 8090);
 const HOST = process.env.HOST || "127.0.0.1";
-// DEC-0035: Navigator ya no hospeda a Atlas — le habla por HTTP. Sin
-// descubrimiento mDNS todavía (deferido, ver DEC-0035): se requiere la URL
-// explícita, mismo patrón que REGISTRY_URL en los providers de ejemplo antes
-// de DEC-0032.
 const ATLAS_URL = process.env.ATLAS_URL || "http://localhost:8081";
-// TLS opt-in: si TLS_CERT_PATH/TLS_KEY_PATH están seteados, la Chat API sirve
-// wss:// en vez de ws:// (ver docs/tls-autofirmado.md). Certificado
-// autofirmado, solo para la PoC.
 const TLS_CERT_PATH = process.env.TLS_CERT_PATH;
 const TLS_KEY_PATH = process.env.TLS_KEY_PATH;
-// Puente de eventos desde Atlas vía NATS (SPEC-BRIDGE-0001, DEC-0074) —
-// opt-in, mismo NATS_URL que Atlas debe apuntar al mismo servidor. Sin él,
-// Navigator funciona igual que hoy (el chat no depende de esto, ver
-// nats-bridge.ts).
 const NATS_URL = process.env.NATS_URL;
+
+// ── P2P opt-in (DEC-0088) ─────────────────────────────────────────────────────
+// Activar con FHS_P2P_MODE=true o seteando FHS_BOOTSTRAP_ADDRS.
+// Sin ninguno de los dos, el Navigator usa el modo Atlas HTTP clásico.
+const FHS_P2P_MODE = process.env.FHS_P2P_MODE === "true" || !!process.env.FHS_BOOTSTRAP_ADDRS;
+const FHS_BOOTSTRAP_ADDRS = process.env.FHS_BOOTSTRAP_ADDRS
+  ? process.env.FHS_BOOTSTRAP_ADDRS.split(",").map((a) => a.trim())
+  : [];
+const FHS_LISTEN_ADDRS = process.env.FHS_LISTEN_ADDRS
+  ? process.env.FHS_LISTEN_ADDRS.split(",").map((a) => a.trim())
+  : ["/ip4/0.0.0.0/tcp/4010/ws"];
+const IDENTITY_KEY_PATH = process.env.IDENTITY_KEY_PATH ?? "./.fhs-identity-navigator.json";
 
 async function main() {
   const tlsEnabled = !!(TLS_CERT_PATH && TLS_KEY_PATH);
@@ -50,9 +52,20 @@ async function main() {
   const natsBridge = await connectNatsBridge(NATS_URL, eventBus, { warn: (msg) => app.log.warn(msg) });
   if (natsBridge.connected) app.log.info(`Puente NATS activo desde ${NATS_URL} (fhs.node.online / fhs.node.lost)`);
 
+  // Arrancar nodo P2P si está habilitado
+  let p2pProviders;
+  if (FHS_P2P_MODE) {
+    app.log.info("[navigator-p2p] Modo P2P activo (DEC-0088)");
+    p2pProviders = await initP2pProviders({
+      identityKeyPath: IDENTITY_KEY_PATH,
+      listenAddrs: FHS_LISTEN_ADDRS,
+      bootstrapAddrs: FHS_BOOTSTRAP_ADDRS,
+    });
+  }
+
   setupEventsApi(app, eventBus);
-  setupChatApi(app, atlasClient, eventBus);
-  setupChatWebSocket(app, atlasClient, eventBus);
+  setupChatApi(app, atlasClient, eventBus, p2pProviders);
+  setupChatWebSocket(app, atlasClient, eventBus, p2pProviders);
 
   app.get("/health", () => ({
     ok: true,
@@ -61,9 +74,6 @@ async function main() {
     buildDate: versionInfo.date,
   }));
 
-  // SPEC-IPFS-0001 (DEC-0052): el Portal necesita saber si IPFS está
-  // disponible y cuál es el gateway público default para mostrárselo al
-  // usuario antes de que elija ese transporte — no un dato oculto.
   app.get("/api/ipfs-config", () => ({
     enabled: isIpfsConfigured(),
     publicGatewayUrl: getPublicGatewayUrl(),

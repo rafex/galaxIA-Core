@@ -100,8 +100,8 @@ interface ResolvedToolProvider {
 }
 
 export class AgentRuntime {
-  private llmGateway = new LlmGateway();
-  private mcpHost = new McpHost();
+  private llmGateway: LlmGateway;
+  private mcpHost: McpHost;
   private artifacts: string[] = [];
   private usedTools: Array<{
     capability: string;
@@ -116,8 +116,13 @@ export class AgentRuntime {
     private atlasClient: AtlasClient,
     private eventBus: EventBus,
     private conversationId: string,
-    private deviceId?: string
-  ) {}
+    private deviceId?: string,
+    llmGatewayOverride?: LlmGateway,
+    mcpHostOverride?: McpHost
+  ) {
+    this.llmGateway = llmGatewayOverride ?? new LlmGateway();
+    this.mcpHost = mcpHostOverride ?? new McpHost();
+  }
 
   async run(
     message: UserMessage,

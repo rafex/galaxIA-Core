@@ -5,6 +5,7 @@ import type { AgentSSEEvent, UserMessage } from "@rafex/galaxia-fhs-protocol";
 import { AtlasClient } from "../atlas-client.js";
 import { EventBus } from "../sse/event-bus.js";
 import { AgentRuntime, type ModelPreferences } from "../agent/runtime.js";
+import type { P2pProviders } from "./chat.js";
 
 /** Envoltorio mínimo de mensajes entrantes del WS del Portal — cada rama de `handleMessage` los castea a su forma concreta. */
 type IncomingMessage = { type?: string } & Record<string, unknown>;
@@ -31,7 +32,8 @@ interface PendingKbRecommendation {
 export function setupChatWebSocket(
   app: FastifyInstance,
   atlasClient: AtlasClient,
-  eventBus: EventBus
+  eventBus: EventBus,
+  p2p?: P2pProviders
 ) {
   const runtimes = new Map<string, AgentRuntime>();
   // Estado del flujo de confirmación de OCR (SPEC-OCRCONFIRM-0001). Vive
@@ -100,7 +102,7 @@ export function setupChatWebSocket(
       artifacts?: string[],
       kbProviderIds?: string[]
     ) {
-      const runtime = new AgentRuntime(atlasClient, eventBus, id, deviceId);
+      const runtime = new AgentRuntime(p2p?.atlasClient ?? atlasClient, eventBus, id, deviceId, p2p?.llmGateway, p2p?.mcpHost);
       runtimes.set(id, runtime);
 
       runtime
@@ -129,7 +131,7 @@ export function setupChatWebSocket(
         return;
       }
 
-      const runtime = new AgentRuntime(atlasClient, eventBus, id, deviceId);
+      const runtime = new AgentRuntime(p2p?.atlasClient ?? atlasClient, eventBus, id, deviceId, p2p?.llmGateway, p2p?.mcpHost);
       runtime
         .resolveKbCandidates(message.content, preferences)
         .then(({ candidates, chosenByLlm }) => {
@@ -155,7 +157,7 @@ export function setupChatWebSocket(
     // conversación como "RAG activa" (degradación graceful, sin error
     // visible: el usuario ya obtiene su respuesta vía el texto OCR completo).
     function indexForRag(id: string, text: string, preferences: ModelPreferences) {
-      const runtime = new AgentRuntime(atlasClient, eventBus, id, deviceId);
+      const runtime = new AgentRuntime(p2p?.atlasClient ?? atlasClient, eventBus, id, deviceId, p2p?.llmGateway, p2p?.mcpHost);
       runtime
         .indexDocumentForRag(text, preferences)
         .then((indexed) => {
@@ -193,7 +195,7 @@ export function setupChatWebSocket(
 
           // Modo "confirmar" (default, SPEC-OCRCONFIRM-0001): se extrae el
           // texto y se muestra al usuario, pero NO se llama al LLM todavía.
-          const runtime = new AgentRuntime(atlasClient, eventBus, id, deviceId);
+          const runtime = new AgentRuntime(p2p?.atlasClient ?? atlasClient, eventBus, id, deviceId, p2p?.llmGateway, p2p?.mcpHost);
           runtime
             .extractOcrText(body.artifacts, body.attachmentName || "archivo adjunto", preferences)
             .then((text) => {
