@@ -5,7 +5,8 @@
   "description": "FHS — Federation of Sovereign Horizons. Runtime core: Atlas, Navigator, Portal Chat, Portal TUI, Log Agent.",
   "type": "module",
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
     "dev:web": "npm run dev -w apps/portal-chat",
@@ -33,5 +34,9 @@
   },
   "allowScripts": {
     "better-sqlite3@12.11.1": true
+  },
+  "overrides": {
+    "@libp2p/interface": "3.2.5",
+    "@libp2p/interface-internal": "3.1.11"
   }
 }
