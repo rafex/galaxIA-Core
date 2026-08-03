@@ -40,10 +40,11 @@ export default tseslint.config(
     },
   },
   {
-    // fhs-node tipifica FhsNode como `any` por el conflicto documentado entre
-    // @libp2p/interface@^2 (gossipsub/floodsub pre-3.x) y @libp2p/interface@^3
-    // (libp2p@3.x). Se relajan las reglas no-unsafe-* solo en este paquete.
-    files: ["packages/fhs-node/**/*.ts"],
+    // FhsNode se tipifica como `any` por el conflicto documentado entre
+    // @libp2p/interface@^2 (floodsub/gossipsub pre-3.x) y @libp2p/interface@^3
+    // (libp2p@3.x). Se relajan las reglas no-unsafe-* en los paquetes que usan
+    // @rafex/galaxia-fhs-node (que re-exporta FhsNode = any).
+    files: ["packages/fhs-node/**/*.ts", "apps/atlas/**/*.ts"],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-unsafe-argument": "off",

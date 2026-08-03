@@ -1,11 +1,20 @@
 {
   "name": "@rafex/galaxia-fhs-node",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "description": "Stack libp2p canónico para nodos FHS (Atlas, Navigator, Star, Satellite).",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run"
@@ -17,6 +26,7 @@
     "@libp2p/crypto": "5.1.22",
     "@libp2p/floodsub": "^11.0.28",
     "@libp2p/identify": "^4.1.12",
+    "@libp2p/ping": "^3.1.11",
     "@libp2p/interface": "^3.2.5",
     "@libp2p/kad-dht": "16.4.2",
     "@libp2p/peer-id": "6.0.14",
