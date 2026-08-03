@@ -19,7 +19,7 @@
     "build": "sh ../../helpers/scripts/shell/gen-version.sh 2>/dev/null || true; tsc",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@rafex/galaxia-fhs-node": "*",
