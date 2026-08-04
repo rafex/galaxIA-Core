@@ -3,17 +3,17 @@
 # dependencies = []
 # ///
 """Sube la version patch del package.json de un workspace si la version
-actual ya esta publicada en GitHub Packages.
+actual ya esta publicada en npmjs.org.
 
 Por que existe: publicar una version nueva de un paquete (@rafex/galaxia-
 fhs-protocol, @galaxia/atlas, @galaxia/navigator, @galaxia/portal-chat)
 requiere subir el campo "version" en su package.json ANTES de mergear a
 main (spec-native/pipelines/CD.md) -- si se olvida, el workflow de
 publicacion simplemente no hace nada (detecta que la version ya existe y
-se salta el publish). Este script automatiza ese paso: consulta GitHub
-Packages, y si la version actual ya fue publicada, sube el patch
-automaticamente. Generalizado (antes bump_protocol_version.py, solo para
-packages/fhs-protocol) para reusarse en los 4 paquetes distribuibles.
+se salta el publish). Este script automatiza ese paso: consulta npmjs.org,
+y si la version actual ya fue publicada, sube el patch automaticamente.
+Generalizado (antes bump_protocol_version.py, solo para
+packages/fhs-protocol) para reusarse en los 3 paquetes distribuibles.
 
 Uso:
     uv run helpers/python/bump_package_version.py <workspace> [--check]
@@ -25,8 +25,8 @@ Uso:
                  (exit code 1 si la version actual ya esta publicada)
 
 Variables de entorno:
-    GH_TOKEN   token con permiso read:packages (requerido -- GitHub
-               Packages exige autenticacion incluso para paquetes publicos)
+    NPM_TOKEN  token de npmjs.org (opcional para consultar metadatos
+               publicos; se usa si esta disponible).
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-REGISTRY = "https://npm.pkg.github.com"
+REGISTRY = "https://registry.npmjs.org"
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -51,12 +51,13 @@ def read_version(package_json: dict) -> tuple[int, int, int]:
     return tuple(int(g) for g in match.groups())  # type: ignore[return-value]
 
 
-def is_version_published(package_name: str, version: str, token: str) -> bool:
-    """Consulta GitHub Packages directamente (no via npm view) para no
-    depender de que el .npmrc local ya este configurado con el registro."""
-    encoded_name = package_name.replace("/", "%2f")
+def is_version_published(package_name: str, version: str, token: str = "") -> bool:
+    """Consulta npmjs directamente para no depender de la configuracion local."""
+    npm_name = package_name.replace("@rafex/", "@rafex_labs/", 1)
+    encoded_name = npm_name.replace("/", "%2f")
     url = f"{REGISTRY}/{encoded_name}"
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.load(resp)
@@ -77,10 +78,7 @@ def main() -> int:
     workspace = args[0]
     package_json_path = ROOT / workspace / "package.json"
 
-    token = os.environ.get("GH_TOKEN")
-    if not token:
-        print("✗ ERROR: falta la variable de entorno GH_TOKEN (ver docstring).", file=sys.stderr)
-        return 2
+    token = os.environ.get("NPM_TOKEN", "")
 
     package_json = json.loads(package_json_path.read_text())
     package_name = package_json["name"]
