@@ -43,7 +43,7 @@ ENV NODE_ENV=production
 ENV PORT=8081
 ENV HOST=0.0.0.0
 ENV ATLAS_DB_PATH=/app/apps/atlas/data/atlas-metrics.db
-ENV FHS_P2P_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001/ws
+ENV FHS_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001/ws
 ENV IDENTITY_KEY_PATH=/app/apps/atlas/data/.fhs-identity-atlas.json
 
 COPY --from=builder /app/package*.json ./

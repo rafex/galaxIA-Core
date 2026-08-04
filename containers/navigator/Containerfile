@@ -38,7 +38,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8090
 ENV HOST=0.0.0.0
-ENV FHS_P2P_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/ws
+ENV FHS_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/ws
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules

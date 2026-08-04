@@ -42,7 +42,7 @@ services:
     environment:
       - PORT=8090
       - HOST=0.0.0.0
-      - FHS_P2P_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/tls/ws
+      - FHS_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/tls/ws
       - FHS_BOOTSTRAP_ADDRS=${FHS_BOOTSTRAP_ADDRS:-}
       - FHS_ANNOUNCE_ADDRS=${FHS_ANNOUNCE_ADDRS:-}
       - TLS_CERT_PATH=/certs/dev.crt
