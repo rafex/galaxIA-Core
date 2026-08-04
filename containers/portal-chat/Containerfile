@@ -7,22 +7,19 @@ WORKDIR /app
 ARG COMMIT_HASH=unknown
 ARG BUILD_DATE=unknown
 
+# fhs-protocol es ahora un paquete npm externo (galaxIA-SDK) — no se copia local
 COPY package*.json ./
-COPY packages/fhs-protocol/package.json ./packages/fhs-protocol/
-COPY apps/navigator/package.json ./apps/navigator/
 COPY apps/portal-chat/package.json ./apps/portal-chat/
 
-RUN npm ci
+RUN npm install --workspace=apps/portal-chat
 
-COPY packages/fhs-protocol ./packages/fhs-protocol
 COPY apps/portal-chat ./apps/portal-chat
 
 # Generar version.json para el frontend
 RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
       > apps/portal-chat/public/version.json
 
-RUN npm run build -w packages/fhs-protocol && \
-    npm run build -w apps/portal-chat
+RUN npm run build -w apps/portal-chat
 
 FROM docker.io/library/nginx:alpine
 COPY --from=builder /app/apps/portal-chat/dist /usr/share/nginx/html
