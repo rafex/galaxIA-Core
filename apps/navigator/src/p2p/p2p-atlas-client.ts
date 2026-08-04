@@ -9,7 +9,7 @@
  * recordSample() → no-op (la telemetría P2P se hará via ReputationUpdate GossipSub)
  */
 
-import type { PublishedService } from "@rafex/galaxia-fhs-protocol";
+import { FhsProto, type PublishedService } from "@rafex/galaxia-fhs-protocol";
 import type { AtlasClient, ResolvedProvider } from "../atlas-client.js";
 import type { PeerCache, PeerEntry } from "./nav-node.js";
 
@@ -29,6 +29,10 @@ function peerToProvider(peer: PeerEntry, type: "llm" | "mcp"): ResolvedProvider 
             },
           ]
         : [],
+    // Preserve the provider visibility declared in the signed FHS beacon.
+    // Without this field matchesScope() treats the peer as external and
+    // rejects community-scoped requests even when the beacon says community.
+    visibility: visibilityFromBeacon(peer.beacon.provider?.visibility),
     privacy: { scope: "network" },
   } as unknown as PublishedService;
 
@@ -38,6 +42,22 @@ function peerToProvider(peer: PeerEntry, type: "llm" | "mcp"): ResolvedProvider 
     type,
     service,
   };
+}
+
+function visibilityFromBeacon(value: FhsProto.Visibility | undefined): "local" | "network" | "community" | "external" {
+  switch (value) {
+    case FhsProto.Visibility.PRIVATE:
+      return "local";
+    case FhsProto.Visibility.COMMUNITY:
+      return "community";
+    case FhsProto.Visibility.PUBLIC:
+      return "external";
+    default:
+      // Reference providers default to community visibility. An unspecified
+      // beacon must not silently become external and disappear from the MVP
+      // community scope.
+      return "community";
+  }
 }
 
 export class P2pAtlasClient implements AtlasClient {
