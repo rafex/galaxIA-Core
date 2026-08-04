@@ -6,6 +6,7 @@ import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { createLibp2p } from "libp2p";
 import { multiaddr } from "@multiformats/multiaddr";
+import { WebSocketsSecure } from "@multiformats/multiaddr-matcher";
 import { base58btc } from "multiformats/bases/base58";
 import type { AgentEvent } from "../types/fhs.js";
 import * as FhsProto from "@rafex/galaxia-fhs-protocol/generated";
@@ -88,6 +89,12 @@ export function connectToChat(
         privateKey,
         addresses: { listen: [] },
         transports: [webSockets()],
+        // libp2p's browser default denies private addresses. The GalaxIA
+        // portal intentionally dials the Navigator over the private LAN,
+        // but only through the TLS WebSocket transport.
+        connectionGater: {
+          denyDialMultiaddr: (address) => !WebSocketsSecure.matches(address),
+        },
         connectionEncrypters: [noise()],
         streamMuxers: [yamux()],
         services: { identify: identify() },
