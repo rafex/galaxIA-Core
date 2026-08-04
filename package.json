@@ -11,7 +11,7 @@
   "scripts": {
     "dev:web": "npm run dev -w apps/portal-chat",
     "dev:agent": "npm run dev -w apps/navigator",
-    "build": "npm run build -w apps/atlas && npm run build -w apps/navigator && npm run build -w apps/portal-chat",
+    "build": "npm run build -w packages/fhs-node && npm run build -w apps/atlas && npm run build -w apps/navigator && npm run build -w apps/portal-chat",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "npm run lint --workspaces && npm run lint:scripts",

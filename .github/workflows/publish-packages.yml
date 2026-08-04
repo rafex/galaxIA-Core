@@ -76,7 +76,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://npm.pkg.github.com"
 
       - name: Setup uv
@@ -89,6 +89,9 @@ jobs:
         run: npm ci
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Construir dependencia workspace fhs-node
+        run: npm run build -w packages/fhs-node
 
       - name: Determinar qué paquetes cambiaron
         id: changed

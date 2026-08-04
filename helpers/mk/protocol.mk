@@ -24,6 +24,7 @@ atlas-bump:
 
 atlas-verify:
 	$(call section,Verificando contenido del paquete de atlas)
+	@npm run build -w packages/fhs-node
 	@sh helpers/shell/verify-package.sh apps/atlas
 	$(call ok,Paquete verificado)
 
@@ -46,6 +47,7 @@ navigator-bump:
 
 navigator-verify:
 	$(call section,Verificando contenido del paquete de navigator)
+	@npm run build -w packages/fhs-node
 	@sh helpers/shell/verify-package.sh apps/navigator
 	$(call ok,Paquete verificado)
 
