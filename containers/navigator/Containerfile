@@ -7,7 +7,7 @@
 #   podman build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
 #     -f containers/navigator/Containerfile .
 
-FROM docker.io/library/node:20-alpine AS builder
+FROM docker.io/library/node:22-alpine AS builder
 WORKDIR /app
 
 ARG COMMIT_HASH=unknown
@@ -33,7 +33,7 @@ RUN npm run build -w packages/fhs-node && \
     npm run build -w apps/navigator
 
 # Imagen final mínima
-FROM docker.io/library/node:20-alpine
+FROM docker.io/library/node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8090
