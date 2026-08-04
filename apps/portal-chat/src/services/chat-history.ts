@@ -119,9 +119,11 @@ function isChatConversation(value: unknown): value is ChatConversation {
 
 function isChatMessage(value: unknown): value is ChatMessage {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<ChatMessage>;
+  const candidate = value as Partial<ChatMessage> & { failed?: unknown; failureMessage?: unknown };
   return typeof candidate.id === "string" &&
     (candidate.role === "user" || candidate.role === "assistant") &&
     typeof candidate.content === "string" &&
-    typeof candidate.createdAt === "number";
+    typeof candidate.createdAt === "number" &&
+    (candidate.failed === undefined || typeof candidate.failed === "boolean") &&
+    (candidate.failureMessage === undefined || typeof candidate.failureMessage === "string");
 }

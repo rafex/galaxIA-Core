@@ -41,4 +41,21 @@ describe("chat-history", () => {
     expect(formatDuration(2_450)).toBe("2.5 s");
     expect(formatDuration(65_000)).toBe("1 min 5 s");
   });
+
+  it("conserva el estado de fallo para permitir reintentar el mensaje", () => {
+    const message: ChatMessage = {
+      id: "m-failed",
+      role: "user",
+      content: "¿Qué dice el documento?",
+      createdAt: 1_000,
+      failed: true,
+      failureMessage: "No hay proveedores de OCR disponibles",
+    };
+    const conversation = { id: "c-failed", title: "Nueva conversación", createdAt: 1_000, updatedAt: 1_000, messages: [message] };
+
+    const storage = new MemoryStorage();
+    saveChatHistory(upsertConversation(createChatHistory(), conversation), storage);
+
+    expect(loadChatHistory(storage).conversations[0]?.messages[0]).toEqual(message);
+  });
 });

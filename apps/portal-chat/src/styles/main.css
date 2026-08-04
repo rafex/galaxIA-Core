@@ -434,6 +434,36 @@ input {
   font-weight: 600;
 }
 
+.message-failure {
+  margin-top: 0.5rem;
+  color: var(--danger, #b42318);
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+}
+
+.retry-btn {
+  margin-top: 0.625rem;
+  border: var(--border-width) solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  padding: 0.5rem 0.75rem;
+  min-height: 36px;
+  background: var(--surface-hover);
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.retry-btn:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.retry-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .message.ocr-preview summary {
   cursor: pointer;
   font-weight: 600;

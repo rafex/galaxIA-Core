@@ -16,6 +16,12 @@ import { createDrawerGroup } from "./drawer.js";
 import { initTooltips, refreshTooltip } from "./tooltip.js";
 import { createTour, hasTourRun, type TourStep } from "./tour.js";
 
+interface RetryPayload {
+  message: string;
+  artifacts?: string[];
+  attachmentName?: string;
+}
+
 export function createApp(container: HTMLElement, version: string = "unknown") {
   const state: ChatState = {
     messages: [],
@@ -35,10 +41,15 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   let chatHistory: ChatHistory = createChatHistory();
   let responseStartedAt: number | null = null;
   let responseMessageId: string | null = null;
+  let pendingMessageId: string | null = null;
   let chatConnection: ChatConnection | null = null;
   let pendingAttachment: string | null = null;
   let pendingAttachmentIsPdf = false;
   let pendingAttachmentName: string | null = null;
+  const retryPayloads = new Map<string, RetryPayload>();
+  let promptHistoryIndex = -1;
+  let promptHistoryDraft = "";
+  let navigatingPromptHistory = false;
 
   applyTheme(getInitialTheme());
 
@@ -75,7 +86,8 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         <div class="composer">
           <input type="file" class="file-input" accept="image/*,application/pdf" hidden />
           <button class="attach-btn" type="button" data-tooltip="Adjuntar una imagen o PDF para extraer texto (OCR)">📎</button>
-          <textarea placeholder="Escribe un mensaje..." rows="1"></textarea>
+          <textarea placeholder="Escribe un mensaje... (↑/↓ historial)" rows="1"
+            aria-label="Escribe un mensaje; usa las flechas arriba y abajo para recorrer el historial"></textarea>
           <button class="send-btn" type="button" data-tooltip="Enviar mensaje (Enter)">Enviar</button>
         </div>
       </main>
@@ -294,10 +306,22 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   });
 
   textareaEl.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowUp" && !event.shiftKey && (!textareaEl.value || (textareaEl.selectionStart === 0 && textareaEl.selectionEnd === 0))) {
+      if (navigatePromptHistory("up")) event.preventDefault();
+      return;
+    }
+    if (event.key === "ArrowDown" && !event.shiftKey && textareaEl.selectionStart === textareaEl.value.length && textareaEl.selectionEnd === textareaEl.value.length) {
+      if (navigatePromptHistory("down")) event.preventDefault();
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void submitMessage();
     }
+  });
+
+  textareaEl.addEventListener("input", () => {
+    if (!navigatingPromptHistory) resetPromptHistoryNavigation();
   });
 
   sendBtn.addEventListener("click", () => void submitMessage());
@@ -348,6 +372,8 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     historyConversationId = null;
     responseStartedAt = null;
     responseMessageId = null;
+    pendingMessageId = null;
+    resetPromptHistoryNavigation();
     state.messages = [];
     state.isStreaming = false;
     hideThinking();
@@ -368,11 +394,56 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     historyConversationId = selected.id;
     responseStartedAt = null;
     responseMessageId = null;
+    pendingMessageId = null;
+    resetPromptHistoryNavigation();
     state.messages = [...selected.messages];
     activityLogEl.innerHTML = "";
     provenancePlaceholder.textContent = "Esperando primera respuesta...";
     renderConversationList();
     renderMessages();
+  }
+
+  function resetPromptHistoryNavigation() {
+    promptHistoryIndex = -1;
+    promptHistoryDraft = "";
+  }
+
+  function promptHistory(): string[] {
+    return state.messages
+      .filter((message): message is Extract<ChatMessage, { role: "user" }> => message.role === "user")
+      .map((message) => message.content)
+      .filter((content) => content.length > 0);
+  }
+
+  function navigatePromptHistory(direction: "up" | "down"): boolean {
+    const prompts = promptHistory();
+    if (prompts.length === 0) return false;
+
+    if (direction === "up") {
+      if (promptHistoryIndex === -1) promptHistoryDraft = textareaEl.value;
+      if (promptHistoryIndex >= prompts.length - 1) return false;
+      promptHistoryIndex += 1;
+      setTextareaFromPromptHistory(prompts[prompts.length - 1 - promptHistoryIndex] ?? "");
+      return true;
+    }
+
+    if (promptHistoryIndex === -1) return false;
+    if (promptHistoryIndex === 0) {
+      promptHistoryIndex = -1;
+      setTextareaFromPromptHistory(promptHistoryDraft);
+      promptHistoryDraft = "";
+      return true;
+    }
+    promptHistoryIndex -= 1;
+    setTextareaFromPromptHistory(prompts[prompts.length - 1 - promptHistoryIndex] ?? "");
+    return true;
+  }
+
+  function setTextareaFromPromptHistory(value: string) {
+    navigatingPromptHistory = true;
+    textareaEl.value = value;
+    textareaEl.setSelectionRange(value.length, value.length);
+    navigatingPromptHistory = false;
   }
 
   function ensureHistoryConversation(): ChatConversation {
@@ -465,6 +536,25 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       (message.role === "assistant" && message.durationMs != null ? ` · ${formatDuration(message.durationMs)}` : "");
     meta.title = new Date(messageTimestamp(message)).toLocaleString();
     div.appendChild(meta);
+
+    if (message.role === "user" && message.failed) {
+      const failure = document.createElement("div");
+      failure.className = "message-failure";
+      failure.textContent = message.failureMessage || "No se pudo enviar este mensaje.";
+      div.appendChild(failure);
+
+      const retryBtn = document.createElement("button");
+      retryBtn.type = "button";
+      retryBtn.className = "retry-btn";
+      retryBtn.textContent = "Reintentar";
+      const canRetryAttachment = !message.attachmentName || retryPayloads.has(message.id);
+      retryBtn.disabled = !canRetryAttachment;
+      retryBtn.title = canRetryAttachment
+        ? "Enviar de nuevo este mensaje en la misma conversación"
+        : "El adjunto ya no está disponible; vuelve a cargarlo";
+      retryBtn.addEventListener("click", () => retryMessage(message.id));
+      div.appendChild(retryBtn);
+    }
     return div;
   }
 
@@ -498,19 +588,18 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
     const userContent = text || (pendingAttachment ? (pendingAttachmentIsPdf ? "[PDF adjunto]" : "[imagen adjunta]") : "");
     const createdAt = Date.now();
+    const messageId = crypto.randomUUID();
+    const artifacts = pendingAttachment ? [pendingAttachment] : undefined;
+    const attachmentName = pendingAttachmentName;
     addMessage({
-      id: crypto.randomUUID(),
+      id: messageId,
       role: "user",
       content: userContent,
       createdAt,
-      attachmentName: pendingAttachment ? pendingAttachmentName || undefined : undefined,
+      attachmentName: attachmentName || undefined,
       attachmentIsPdf: pendingAttachmentIsPdf,
     });
-    responseStartedAt = createdAt;
-    responseMessageId = null;
-
-    const artifacts = pendingAttachment ? [pendingAttachment] : undefined;
-    const attachmentName = pendingAttachmentName;
+    retryPayloads.set(messageId, { message: text, artifacts, attachmentName: attachmentName || undefined });
     pendingAttachment = null;
     pendingAttachmentIsPdf = false;
     pendingAttachmentName = null;
@@ -518,16 +607,30 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     attachBtn.classList.remove("attached");
     textareaEl.value = "";
     textareaEl.style.height = "auto";
+    resetPromptHistoryNavigation();
+    dispatchMessage(messageId, { message: text, artifacts, attachmentName: attachmentName || undefined });
+  }
+
+  function dispatchMessage(messageId: string, payload: RetryPayload) {
+    const userMessage = state.messages.find((message) => message.id === messageId);
+    if (!userMessage || userMessage.role !== "user") return;
+    userMessage.failed = false;
+    userMessage.failureMessage = undefined;
+    refreshMessageElement(userMessage);
+    responseStartedAt = Date.now();
+    responseMessageId = null;
+    pendingMessageId = messageId;
     state.isStreaming = true;
     sendBtn.disabled = true;
     activityLogEl.innerHTML = "";
     hideThinking();
+    persistActiveConversation();
 
     const sendOptions = {
       conversationId: conversationId || undefined,
-      message: text,
-      artifacts,
-      attachmentName: attachmentName || undefined,
+      message: payload.message,
+      artifacts: payload.artifacts,
+      attachmentName: payload.attachmentName,
       preferences: {
         model: state.selectedModel,
         scope: state.privacyScope,
@@ -546,6 +649,37 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     } else {
       chatConnection.send(sendOptions);
     }
+  }
+
+  function retryMessage(messageId: string) {
+    if (state.isStreaming) return;
+    const message = state.messages.find((candidate) => candidate.id === messageId);
+    if (!message || message.role !== "user" || !message.failed) return;
+
+    const payload = retryPayloads.get(messageId) ?? (
+      message.attachmentName
+        ? undefined
+        : { message: message.content }
+    );
+    if (!payload) {
+      addActivityItem("error", "El adjunto ya no está disponible para reenviar; vuelve a cargarlo.");
+      return;
+    }
+
+    const failedIndex = state.messages.findIndex((candidate) => candidate.id === messageId);
+    const incompleteAssistantIds = new Set<string>();
+    for (const candidate of state.messages.slice(failedIndex + 1)) {
+      if (candidate.role === "user") break;
+      if (candidate.role === "assistant" && candidate.completedAt == null) incompleteAssistantIds.add(candidate.id);
+    }
+    if (responseMessageId) incompleteAssistantIds.add(responseMessageId);
+    if (incompleteAssistantIds.size > 0) {
+      state.messages = state.messages.filter((candidate) => !incompleteAssistantIds.has(candidate.id));
+      responseMessageId = null;
+      renderMessages();
+    }
+    retryPayloads.set(messageId, payload);
+    dispatchMessage(messageId, payload);
   }
 
   function handleEvent(event: AgentEvent) {
@@ -580,12 +714,16 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         hideThinking();
         renderProvenance(event.data.provenance);
         completeAssistantResponse(event.data.provenance);
+        if (pendingMessageId) retryPayloads.delete(pendingMessageId);
+        pendingMessageId = null;
         state.isStreaming = false;
         sendBtn.disabled = false;
         break;
       case "ocr.extracted":
         hideThinking();
         addOcrExtractedMessage(event.data.filename, event.data.text);
+        if (pendingMessageId) retryPayloads.delete(pendingMessageId);
+        pendingMessageId = null;
         state.isStreaming = false;
         sendBtn.disabled = false;
         break;
@@ -598,15 +736,18 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       case "kb.recommended":
         hideThinking();
         addKbRecommendedMessage(event.data.conversationId, event.data.candidates, event.data.chosenByLlm);
+        if (pendingMessageId) retryPayloads.delete(pendingMessageId);
+        pendingMessageId = null;
         state.isStreaming = false;
         sendBtn.disabled = false;
         break;
       case "error":
         hideThinking();
         addActivityItem("error", `[${event.data.code}] ${event.data.message}`);
+        markPendingMessageFailed(event.data.message);
         persistActiveConversation();
         responseStartedAt = null;
-        responseMessageId = null;
+        pendingMessageId = null;
         state.isStreaming = false;
         sendBtn.disabled = false;
         break;
@@ -626,6 +767,15 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     messagesEl.appendChild(renderMessageElement(message));
     persistActiveConversation();
     messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function markPendingMessageFailed(message: string) {
+    if (!pendingMessageId) return;
+    const userMessage = state.messages.find((candidate) => candidate.id === pendingMessageId);
+    if (!userMessage || userMessage.role !== "user") return;
+    userMessage.failed = true;
+    userMessage.failureMessage = message;
+    renderMessages();
   }
 
   let thinkingEl: HTMLElement | null = null;

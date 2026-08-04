@@ -9,6 +9,8 @@ export type ChatMessage =
       createdAt: number;
       completedAt?: number;
       durationMs?: number;
+      failed?: boolean;
+      failureMessage?: string;
       attachmentName?: string;
       attachmentIsPdf?: boolean;
     }
