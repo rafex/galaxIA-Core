@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 /*
  * Sesión Portal ↔ Navigator sobre el stream libp2p FHS.
  *
