@@ -33,19 +33,22 @@ docker compose up --build
 
 | Servicio | URL local | Descripción |
 |---|---|---|
-| Frontend | http://localhost:3000 | Chat web FHS |
-| Agent Backend | http://localhost:8081 | API REST + SSE + Registry WS |
-| OCR MCP | http://localhost:8082/mcp | Servidor MCP OCR |
+| Frontend | https://localhost:8443 | Portal HTTPS-only; el chat usa libp2p/WSS |
+| Atlas/Navigator | libp2p `/ws` y `/tls/ws` | Bootstrap, DHT, GossipSub y streams FHS |
 
 ### 3. Conectar llama.cpp
 
-Si tienes `llama-server` corriendo en otra máquina (por ejemplo `192.168.3.173:43110`), regístralo manualmente en el Registry:
+Si tienes `llama-server` corriendo en el Bastion (por ejemplo `192.168.1.139:43110`), el Star lo consume como excepción local del modelo:
 
 ```bash
 npx tsx scripts/mock-providers.ts
 ```
 
 O edita el script para apuntar a tu llama-server real.
+
+El portal requiere un multiaddr `.../tls/ws` de Navigator en
+`VITE_FHS_NAVIGATOR_MULTIADDR` durante el build. El certificado del portal es
+autofirmado y debe aceptarse explícitamente en el navegador.
 
 ## Desarrollo sin contenedores
 

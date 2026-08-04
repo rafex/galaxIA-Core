@@ -1,16 +1,8 @@
-# Overlay opcional para activar TLS/HTTPS con certificado autofirmado en
-# la comunicación FHS del core (navegador↔portal-chat, portal-chat↔navigator).
-# No modifica containers/compose.yaml — se usa junto a él.
+# Overlay de certificados para despliegues que ya generan el par TLS en el
+# host. El compose base ya es HTTPS-only para el portal y WSS para Navigator.
 #
 # El overlay TLS de los providers externos (Star/Satellite/RAG/KB) vive en
 # `galaxIA-satellite-star` (repo separado), no aquí.
-#
-# Nota (DEC-0035): el link HTTP Navigator→Atlas (ATLAS_URL) NO está cubierto
-# por este overlay todavía — AtlasClient usa `fetch` nativo sin override de
-# confianza para certificados autofirmados (a diferencia de las conexiones
-# WebSocket del resto del stack, que sí usan `rejectUnauthorized: false`
-# explícito). Con TLS activo, `ATLAS_URL=https://atlas:8081` fallaría por
-# certificado no confiable. Queda documentado como pendiente, no resuelto.
 #
 # Requiere generar el certificado antes (una vez por máquina, o copiar el
 # mismo par a laptop y bastion):
@@ -42,9 +34,6 @@ services:
     environment:
       - TLS_CERT_PATH=/certs/dev.crt
       - TLS_KEY_PATH=/certs/dev.key
-      # Ver nota arriba: esto es lo "correcto" en intención, pero falla hoy
-      # porque AtlasClient no confía en certificados autofirmados todavía.
-      - ATLAS_URL=https://atlas:8081
     volumes:
       - ${CERTS_DIR:-../certs}:/certs:ro
 
@@ -55,13 +44,5 @@ services:
     # "Apps" en despliegues previos de este proyecto.
     ports:
       - "8443:443"
-    # ATLAS_URL/NAVIGATOR_URL con esquema https:// aquí — nginx-tls.conf
-    # espera hablarle a Atlas/Navigator vía TLS, a diferencia del default
-    # http:// de compose.yaml (mismo mecanismo de template, ver
-    # nginx-tls.conf.template).
-    environment:
-      - ATLAS_URL=${ATLAS_URL:-https://atlas:8081}
-      - NAVIGATOR_URL=${NAVIGATOR_URL:-https://navigator:8090}
     volumes:
       - ${CERTS_DIR:-../certs}:/etc/nginx/certs:ro
-      - ./portal-chat/nginx-tls.conf.template:/etc/nginx/templates/nginx.conf.template:ro

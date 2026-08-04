@@ -26,7 +26,7 @@ services:
     image: ghcr.io/rafex/galaxia-atlas:${GALAXIA_VERSION:-latest}
     container_name: fhs-atlas
     ports:
-      - "${ATLAS_PORT:-30083}:8081"
+      - "4001:4001"
     environment:
       - PORT=8081
       - HOST=0.0.0.0
@@ -42,7 +42,15 @@ services:
     environment:
       - PORT=8090
       - HOST=0.0.0.0
-      - ATLAS_URL=http://atlas:8081
+      - FHS_P2P_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/tls/ws
+      - FHS_BOOTSTRAP_ADDRS=${FHS_BOOTSTRAP_ADDRS:-}
+      - FHS_ANNOUNCE_ADDRS=${FHS_ANNOUNCE_ADDRS:-}
+      - TLS_CERT_PATH=/certs/dev.crt
+      - TLS_KEY_PATH=/certs/dev.key
+    ports:
+      - "4010:4010"
+    volumes:
+      - ${CERTS_DIR:-../certs}:/certs:ro
     depends_on:
       - atlas
     networks:
@@ -53,13 +61,10 @@ services:
     image: ghcr.io/rafex/galaxia-portal-chat:${GALAXIA_VERSION:-latest}
     container_name: fhs-portal-chat
     ports:
-      - "${PORTAL_PORT:-3000}:80"
-    # Defaults para un solo host (DNS del compose: atlas/navigator). Para
-    # multi-host, corre Portal-chat por separado (sin este compose completo) y
-    # setea ATLAS_URL/NAVIGATOR_URL a las IPs reales — ver docs/instalacion.md.
+      - "${PORTAL_PORT:-8443}:443"
     environment:
-      - ATLAS_URL=${ATLAS_URL:-http://atlas:8081}
-      - NAVIGATOR_URL=${NAVIGATOR_URL:-http://navigator:8090}
+      - PORTAL_CERT_CN=${PORTAL_CERT_CN:-localhost}
+      - PORTAL_CERT_SAN=${PORTAL_CERT_SAN:-DNS:localhost,IP:127.0.0.1}
     depends_on:
       - navigator
       - atlas

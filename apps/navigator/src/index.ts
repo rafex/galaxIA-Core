@@ -42,6 +42,8 @@ async function main() {
     listenAddrs: FHS_LISTEN_ADDRS,
     announceAddrs: FHS_ANNOUNCE_ADDRS,
     bootstrapAddrs: FHS_BOOTSTRAP_ADDRS,
+    tlsCertPath: TLS_CERT_PATH,
+    tlsKeyPath: TLS_KEY_PATH,
   }, eventBus);
 
   app.get("/health", () => ({

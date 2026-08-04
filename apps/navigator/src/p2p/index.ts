@@ -33,6 +33,8 @@ export interface P2pConfig {
   listenAddrs: string[];
   announceAddrs?: string[];
   bootstrapAddrs: string[];
+  tlsCertPath?: string;
+  tlsKeyPath?: string;
 }
 
 export interface P2pProviders {
@@ -53,6 +55,8 @@ export async function initP2pProviders(config: P2pConfig, eventBus?: import("../
     listenAddrs: config.listenAddrs,
     announceAddrs: config.announceAddrs,
     bootstrapAddrs: config.bootstrapAddrs,
+    tlsCertPath: config.tlsCertPath,
+    tlsKeyPath: config.tlsKeyPath,
   });
 
   const multiaddrs = (): string[] =>

@@ -1,7 +1,7 @@
 # galaxIA-Core — Docker Compose P2P (DEC-0088)
 # Atlas = pure bootstrap peer libp2p (sin WebSocket de registro).
 # Navigator = orquestador P2P: publica OFFER, recibe BID/ASSIGN, abre stream directo.
-# Portal-chat = frontend; habla con Navigator por HTTP/SSE.
+# Portal-chat = frontend HTTPS-only; el chat usa libp2p/WSS directamente.
 #
 # Orden de arranque:
 #   1. podman-compose up -d atlas          → anotar la multiaddr del log
@@ -16,7 +16,6 @@ services:
       dockerfile: containers/atlas/Containerfile
     container_name: fhs-atlas
     ports:
-      - "8081:8081"       # REST health/status
       - "4001:4001"       # libp2p WebSocket (bootstrap)
     environment:
       - PORT=8081
@@ -35,15 +34,19 @@ services:
       dockerfile: containers/navigator/Containerfile
     container_name: fhs-navigator
     ports:
-      - "8090:8090"       # REST/SSE para portal-chat
-      - "4010:4010"       # libp2p WebSocket
+      - "4010:4010"       # libp2p TLS WebSocket para navegador
     environment:
       - PORT=8090
       - HOST=0.0.0.0
-      - FHS_P2P_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/ws
+      - FHS_P2P_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/tls/ws
+      - TLS_CERT_PATH=/certs/dev.crt
+      - TLS_KEY_PATH=/certs/dev.key
       # FHS_BOOTSTRAP_ADDRS se pasa como variable de entorno del host antes de levantar
       # Ejemplo: /ip4/192.168.1.139/tcp/4001/ws/p2p/<PeerID-Atlas>
       - FHS_BOOTSTRAP_ADDRS=${FHS_BOOTSTRAP_ADDRS:-}
+      - FHS_ANNOUNCE_ADDRS=${FHS_ANNOUNCE_ADDRS:-}
+    volumes:
+      - ${CERTS_DIR:-../certs}:/certs:ro
     depends_on:
       - atlas
     networks:
@@ -54,12 +57,14 @@ services:
     build:
       context: ..
       dockerfile: containers/portal-chat/Containerfile
+      args:
+        VITE_FHS_NAVIGATOR_MULTIADDR: ${VITE_FHS_NAVIGATOR_MULTIADDR:-}
     container_name: fhs-portal-chat
     ports:
-      - "3000:80"
+      - "${PORTAL_PORT:-8443}:443"
     environment:
-      - ATLAS_URL=${ATLAS_URL:-http://atlas:8081}
-      - NAVIGATOR_URL=${NAVIGATOR_URL:-http://navigator:8090}
+      - PORTAL_CERT_CN=${PORTAL_CERT_CN:-localhost}
+      - PORTAL_CERT_SAN=${PORTAL_CERT_SAN:-DNS:localhost,IP:127.0.0.1}
     depends_on:
       - navigator
       - atlas

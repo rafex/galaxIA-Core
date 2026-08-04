@@ -174,6 +174,8 @@ export interface NavNodeConfig {
   listenAddrs?: string[];
   announceAddrs?: string[];
   bootstrapAddrs?: string[];
+  tlsCertPath?: string;
+  tlsKeyPath?: string;
 }
 
 export async function createNavNode(config: NavNodeConfig): Promise<FhsNode> {
@@ -182,6 +184,8 @@ export async function createNavNode(config: NavNodeConfig): Promise<FhsNode> {
     listenAddrs = ["/ip4/0.0.0.0/tcp/4010/ws"],
     announceAddrs,
     bootstrapAddrs = [],
+    tlsCertPath,
+    tlsKeyPath,
   } = config;
 
   const addresses: { listen: string[]; announce?: string[] } = { listen: listenAddrs };
@@ -189,12 +193,22 @@ export async function createNavNode(config: NavNodeConfig): Promise<FhsNode> {
     addresses.announce = announceAddrs;
   }
 
+  const transport =
+    tlsCertPath && tlsKeyPath
+      ? webSockets({
+          https: {
+            cert: readFileSync(tlsCertPath),
+            key: readFileSync(tlsKeyPath),
+          },
+        })
+      : webSockets();
+
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const node: FhsNode = await createLibp2p({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     privateKey: identity.privateKey as any,
     addresses,
-    transports: [webSockets()],
+    transports: [transport],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
     services: {
