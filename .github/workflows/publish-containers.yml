@@ -79,7 +79,10 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          # Las imágenes preexistentes están asociadas a rafex/galaxIA;
+          # GITHUB_TOKEN de galaxIA-Core no tiene write_package sobre ellas.
+          # GHCR_TOKEN es el PAT con write:packages almacenado como secret.
+          password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Build + push ${{ matrix.app }} (${{ matrix.platform }}) por digest
         id: build
@@ -134,7 +137,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Determinar tags de la imagen
         id: tag
