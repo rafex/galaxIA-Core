@@ -20,7 +20,7 @@ COPY apps/navigator/package.json ./apps/navigator/
 
 # Instalar dependencias (fhs-protocol viene de GitHub Packages)
 RUN --mount=type=secret,id=node_auth_token \
-    export NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token)" && npm ci
+    export NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token)" && npm install --ignore-scripts
 
 # Copiar código fuente y construir
 COPY packages/fhs-node ./packages/fhs-node
