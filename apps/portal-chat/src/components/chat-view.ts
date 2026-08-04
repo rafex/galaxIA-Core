@@ -429,11 +429,11 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     messagesEl.innerHTML = "";
     let previousDay = "";
     for (const message of state.messages) {
-      const day = new Date(message.createdAt).toDateString();
+      const day = new Date(messageTimestamp(message)).toDateString();
       if (day !== previousDay) {
         const separator = document.createElement("div");
         separator.className = "message-day-separator";
-        separator.textContent = formatDayLabel(message.createdAt);
+        separator.textContent = formatDayLabel(messageTimestamp(message));
         messagesEl.appendChild(separator);
         previousDay = day;
       }
@@ -461,9 +461,9 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
     const meta = document.createElement("div");
     meta.className = "message-meta";
-    meta.textContent = formatMessageTime(message.createdAt) +
+    meta.textContent = formatMessageTime(messageTimestamp(message)) +
       (message.role === "assistant" && message.durationMs != null ? ` · ${formatDuration(message.durationMs)}` : "");
-    meta.title = new Date(message.createdAt).toLocaleString();
+    meta.title = new Date(messageTimestamp(message)).toLocaleString();
     div.appendChild(meta);
     return div;
   }
@@ -475,7 +475,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     if (body) body.textContent = message.content;
     const meta = element.querySelector(".message-meta");
     if (meta) {
-      meta.textContent = formatMessageTime(message.createdAt) +
+      meta.textContent = formatMessageTime(messageTimestamp(message)) +
         (message.role === "assistant" && message.durationMs != null ? ` · ${formatDuration(message.durationMs)}` : "");
     }
   }
@@ -615,12 +615,12 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   function addMessage(message: ChatMessage) {
     state.messages.push(message);
-    const day = new Date(message.createdAt).toDateString();
+    const day = new Date(messageTimestamp(message)).toDateString();
     const previousMessage = state.messages[state.messages.length - 2];
-    if (!previousMessage || new Date(previousMessage.createdAt).toDateString() !== day) {
+    if (!previousMessage || new Date(messageTimestamp(previousMessage)).toDateString() !== day) {
       const separator = document.createElement("div");
       separator.className = "message-day-separator";
-      separator.textContent = formatDayLabel(message.createdAt);
+      separator.textContent = formatDayLabel(messageTimestamp(message));
       messagesEl.appendChild(separator);
     }
     messagesEl.appendChild(renderMessageElement(message));
@@ -800,6 +800,10 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     persistActiveConversation();
     responseStartedAt = null;
     responseMessageId = null;
+  }
+
+  function messageTimestamp(message: ChatMessage): number {
+    return message.role === "assistant" && message.completedAt != null ? message.completedAt : message.createdAt;
   }
 
   function addActivityItem(level: "info" | "success" | "warning" | "error", text: string) {

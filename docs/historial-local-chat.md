@@ -13,6 +13,10 @@ Estado: decisión MVP implementada en el Portal Chat.
 - No se usa huella de dispositivo. Una fingerprint sería invasiva, inestable
   y no es necesaria para identificar un historial local. En esta MVP tampoco
   se envía un identificador de instalación por P2P.
+- El `deviceId` UUID anónimo que existe para correlación técnica, si alguna
+  función futura lo necesita, no es una fingerprint ni se usa como clave del
+  historial. La clave efectiva del historial sigue siendo el origen/perfil
+  del navegador.
 - Los adjuntos binarios no se guardan en el historial. Solo se conserva el
   nombre y la marca de que existió un adjunto; el contenido debe volver a
   seleccionarse si se necesita reenviarlo.
@@ -25,9 +29,13 @@ Cada mensaje conserva un timestamp Unix en milisegundos, generado por el
 navegador:
 
 - mensaje inicial: `createdAt` del mensaje de usuario;
-- respuesta: `createdAt` cuando llega el primer delta visible del asistente;
+- respuesta visible: `createdAt` cuando llega el primer delta visible del
+  asistente;
 - fin: `completedAt` cuando llega `assistant.completed`;
 - duración: `durationMs = completedAt - createdAt` del mensaje de usuario.
+
+Cuando existe `completedAt`, la etiqueta visual de la respuesta muestra esa
+hora de finalización; mientras se transmite muestra la hora del primer delta.
 
 La hora se muestra en la zona horaria local del navegador. Los mensajes se
 separan por el día local (`Hoy`, `Ayer` o fecha completa), como en WhatsApp.
