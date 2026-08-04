@@ -1,6 +1,5 @@
-# HTTPS-only static portal. Chat sessions use the libp2p/WSS multiaddr baked
-# into the frontend at build time; there is no HTTP proxy or cleartext API
-# path in this container.
+# HTTPS-only static portal. Chat sessions use the libp2p/WSS bootstrap address
+# supplied at container start; there is no HTTP proxy or cleartext API path.
 server {
     listen 443 ssl;
     server_name _;
@@ -14,6 +13,13 @@ server {
     # La versión identifica exactamente la imagen desplegada. No debe quedar
     # atrapada en la caché del navegador después de actualizar el contenedor.
     location = /version.json {
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        try_files $uri =404;
+    }
+
+    # Static runtime configuration only. Chat messages never use this path;
+    # the browser dials Navigator directly with libp2p/WSS.
+    location = /p2p-config.json {
         add_header Cache-Control "no-store, no-cache, must-revalidate" always;
         try_files $uri =404;
     }

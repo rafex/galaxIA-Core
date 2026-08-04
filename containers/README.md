@@ -46,9 +46,14 @@ npx tsx scripts/mock-providers.ts
 
 O edita el script para apuntar a tu llama-server real.
 
-El portal requiere un multiaddr `.../tls/ws` de Navigator en
-`VITE_FHS_NAVIGATOR_MULTIADDR` durante el build. El certificado del portal es
-autofirmado y debe aceptarse explícitamente en el navegador.
+El portal requiere una o varias multiaddrs `.../tls/ws` de bootstrap del
+Navigator en `FHS_NAVIGATOR_BOOTSTRAP_ADDRS` al arrancar el contenedor,
+separadas por comas o saltos de línea. La configuración se genera como un
+archivo estático servido por HTTPS; no se incrusta en la imagen. No se debe
+fijar `/p2p/<PeerID>` en el frontend:
+libp2p aprende la identidad durante Identify/Noise y la sesión se autentica
+con el handshake FHS firmado. El certificado del portal es autofirmado y debe
+aceptarse explícitamente en el navegador.
 
 ## Desarrollo sin contenedores
 

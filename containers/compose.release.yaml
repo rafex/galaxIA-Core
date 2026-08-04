@@ -65,6 +65,7 @@ services:
     environment:
       - PORTAL_CERT_CN=${PORTAL_CERT_CN:-localhost}
       - PORTAL_CERT_SAN=${PORTAL_CERT_SAN:-DNS:localhost,IP:127.0.0.1}
+      - FHS_NAVIGATOR_BOOTSTRAP_ADDRS=${FHS_NAVIGATOR_BOOTSTRAP_ADDRS:-}
     depends_on:
       - navigator
       - atlas

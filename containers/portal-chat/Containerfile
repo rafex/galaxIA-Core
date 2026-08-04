@@ -7,7 +7,6 @@ WORKDIR /app
 
 ARG COMMIT_HASH=unknown
 ARG BUILD_DATE=unknown
-ARG VITE_FHS_NAVIGATOR_MULTIADDR=
 
 # fhs-protocol es ahora un paquete npm externo (galaxIA-SDK) — no se copia local
 COPY package*.json ./
@@ -21,7 +20,6 @@ COPY apps/portal-chat ./apps/portal-chat
 RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
       > apps/portal-chat/public/version.json
 
-ENV VITE_FHS_NAVIGATOR_MULTIADDR=$VITE_FHS_NAVIGATOR_MULTIADDR
 RUN COMMIT_HASH="$COMMIT_HASH" BUILD_DATE="$BUILD_DATE" \
     npm run build -w apps/portal-chat
 
@@ -37,10 +35,12 @@ RUN rm -f /etc/nginx/conf.d/default.conf
 
 COPY containers/portal-chat/nginx-tls.conf.template /etc/nginx/templates/nginx.conf.template
 COPY containers/portal-chat/generate-cert.sh /docker-entrypoint.d/10-generate-cert.sh
-RUN chmod 0755 /docker-entrypoint.d/10-generate-cert.sh
+COPY containers/portal-chat/generate-p2p-config.sh /docker-entrypoint.d/09-generate-p2p-config.sh
+RUN chmod 0755 /docker-entrypoint.d/09-generate-p2p-config.sh /docker-entrypoint.d/10-generate-cert.sh
 
 ENV PORTAL_CERT_CN=localhost
 ENV PORTAL_CERT_SAN=DNS:localhost,IP:127.0.0.1
+ENV FHS_NAVIGATOR_BOOTSTRAP_ADDRS=
 
 EXPOSE 443
 

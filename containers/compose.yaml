@@ -42,7 +42,8 @@ services:
       - TLS_CERT_PATH=/certs/dev.crt
       - TLS_KEY_PATH=/certs/dev.key
       # FHS_BOOTSTRAP_ADDRS se pasa como variable de entorno del host antes de levantar
-      # Ejemplo: /ip4/192.168.1.139/tcp/4001/ws/p2p/<PeerID-Atlas>
+      # El portal recibe solo una dirección TLS de bootstrap; el peer id se
+      # aprende durante Identify/Noise y el handshake FHS firmado.
       - FHS_BOOTSTRAP_ADDRS=${FHS_BOOTSTRAP_ADDRS:-}
       - FHS_ANNOUNCE_ADDRS=${FHS_ANNOUNCE_ADDRS:-}
     volumes:
@@ -57,14 +58,13 @@ services:
     build:
       context: ..
       dockerfile: containers/portal-chat/Containerfile
-      args:
-        VITE_FHS_NAVIGATOR_MULTIADDR: ${VITE_FHS_NAVIGATOR_MULTIADDR:-}
     container_name: fhs-portal-chat
     ports:
       - "${PORTAL_PORT:-8443}:443"
     environment:
       - PORTAL_CERT_CN=${PORTAL_CERT_CN:-localhost}
       - PORTAL_CERT_SAN=${PORTAL_CERT_SAN:-DNS:localhost,IP:127.0.0.1}
+      - FHS_NAVIGATOR_BOOTSTRAP_ADDRS=${FHS_NAVIGATOR_BOOTSTRAP_ADDRS:-}
     depends_on:
       - navigator
       - atlas

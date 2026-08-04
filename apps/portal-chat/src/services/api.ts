@@ -17,6 +17,7 @@ import {
   newEnvelope,
 } from "@rafex/galaxia-fhs-protocol/wire";
 import { FHS_STREAM_PROTOCOL } from "@rafex/galaxia-fhs-protocol/constants";
+import { loadNavigatorBootstrapAddresses } from "./p2p-config.js";
 
 export interface ApiOptions {
   conversationId?: string;
@@ -56,11 +57,6 @@ interface P2pNode {
 
 type P2pPrivateKey = Awaited<ReturnType<typeof generateKeyPair>>;
 
-const NAVIGATOR_MULTIADDR =
-  (import.meta.env.VITE_FHS_NAVIGATOR_MULTIADDR as string | undefined) ??
-  localStorage.getItem("fhs.navigator.multiaddr") ??
-  "";
-
 export function connectToChat(
   onEvent: (event: AgentEvent) => void,
   onOpen?: () => void,
@@ -77,8 +73,23 @@ export function connectToChat(
   void openSession();
 
   async function openSession(): Promise<void> {
-    if (!NAVIGATOR_MULTIADDR) {
-      onEvent({ type: "error", data: { code: "P2P_CONFIG", message: "Falta VITE_FHS_NAVIGATOR_MULTIADDR o fhs.navigator.multiaddr" } });
+    let navigatorBootstrapAddrs: string[];
+    try {
+      navigatorBootstrapAddrs = await loadNavigatorBootstrapAddresses(
+        [
+          import.meta.env.VITE_FHS_NAVIGATOR_BOOTSTRAP_ADDRS as string | undefined,
+          // Read the old variable as a migration aid, but normalize it as a
+          // transport-only address and never trust its embedded peer id.
+          import.meta.env.VITE_FHS_NAVIGATOR_MULTIADDR as string | undefined,
+        ],
+        typeof localStorage === "undefined" ? undefined : localStorage,
+      );
+    } catch (error) {
+      onEvent({ type: "error", data: { code: "P2P_CONFIG", message: error instanceof Error ? error.message : String(error) } });
+      return;
+    }
+    if (navigatorBootstrapAddrs.length === 0) {
+      onEvent({ type: "error", data: { code: "P2P_CONFIG", message: "Falta FHS_NAVIGATOR_BOOTSTRAP_ADDRS o fhs.navigator.bootstrap-addrs" } });
       return;
     }
 
@@ -99,7 +110,19 @@ export function connectToChat(
         streamMuxers: [yamux()],
         services: { identify: identify() },
       }) as unknown as P2pNode;
-      const connection = await node.dial(multiaddr(NAVIGATOR_MULTIADDR));
+      let connection: { newStream(protocol: string): Promise<P2pStream> } | undefined;
+      const dialErrors: string[] = [];
+      for (const bootstrapAddress of navigatorBootstrapAddrs) {
+        try {
+          connection = await node.dial(multiaddr(bootstrapAddress));
+          break;
+        } catch (error) {
+          dialErrors.push(`${bootstrapAddress}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      if (!connection) {
+        throw new Error(`No se pudo conectar a ningún bootstrap Navigator: ${dialErrors.join(" | ")}`);
+      }
       const openedStream = await connection.newStream(FHS_STREAM_PROTOCOL);
       stream = openedStream;
 
