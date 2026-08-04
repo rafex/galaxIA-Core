@@ -306,11 +306,11 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   });
 
   textareaEl.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowUp" && !event.shiftKey && (!textareaEl.value || (textareaEl.selectionStart === 0 && textareaEl.selectionEnd === 0))) {
+    if (event.key === "ArrowUp" && !event.shiftKey && (promptHistoryIndex !== -1 || !textareaEl.value || (textareaEl.selectionStart === 0 && textareaEl.selectionEnd === 0))) {
       if (navigatePromptHistory("up")) event.preventDefault();
       return;
     }
-    if (event.key === "ArrowDown" && !event.shiftKey && textareaEl.selectionStart === textareaEl.value.length && textareaEl.selectionEnd === textareaEl.value.length) {
+    if (event.key === "ArrowDown" && !event.shiftKey && (promptHistoryIndex !== -1 || (textareaEl.selectionStart === textareaEl.value.length && textareaEl.selectionEnd === textareaEl.value.length))) {
       if (navigatePromptHistory("down")) event.preventDefault();
       return;
     }
