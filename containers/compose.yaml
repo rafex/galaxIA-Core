@@ -21,8 +21,9 @@ services:
       - PORT=8081
       - HOST=0.0.0.0
       - FHS_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001/tls/ws
-      - TLS_CERT_PATH=/certs/dev.crt
-      - TLS_KEY_PATH=/certs/dev.key
+      - TLS_CERT_PATH=${TLS_CERT_PATH:-/certs/dev.crt}
+      - TLS_KEY_PATH=${TLS_KEY_PATH:-/certs/dev.key}
+      - NODE_EXTRA_CA_CERTS=${NODE_EXTRA_CA_CERTS:-/certs/dev.crt}
       - IDENTITY_KEY_PATH=/app/apps/atlas/data/.fhs-identity-atlas.json
     volumes:
       - atlas-data:/app/apps/atlas/data
@@ -42,8 +43,9 @@ services:
       - PORT=8090
       - HOST=0.0.0.0
       - FHS_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/tls/ws
-      - TLS_CERT_PATH=/certs/dev.crt
-      - TLS_KEY_PATH=/certs/dev.key
+      - TLS_CERT_PATH=${TLS_CERT_PATH:-/certs/dev.crt}
+      - TLS_KEY_PATH=${TLS_KEY_PATH:-/certs/dev.key}
+      - NODE_EXTRA_CA_CERTS=${NODE_EXTRA_CA_CERTS:-/certs/dev.crt}
       # FHS_BOOTSTRAP_ADDRS se pasa como variable de entorno del host antes de levantar
       # El portal recibe una o más direcciones TLS de bootstrap del swarm; el
       # peer id se aprende durante Identify/Noise y el handshake FHS firmado.

@@ -42,6 +42,7 @@ ENV HOST=0.0.0.0
 ENV FHS_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/tls/ws
 ENV TLS_CERT_PATH=/certs/dev.crt
 ENV TLS_KEY_PATH=/certs/dev.key
+ENV NODE_EXTRA_CA_CERTS=/certs/dev.crt
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
