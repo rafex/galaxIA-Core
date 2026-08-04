@@ -24,7 +24,7 @@ type AgentEventInput = AgentEvent extends infer E
     : never
   : never;
 import { AtlasClient } from "../atlas-client.js";
-import { EventBus } from "../sse/event-bus.js";
+import { EventBus } from "../events/event-bus.js";
 import { LlmGateway } from "../providers/llm-gateway.js";
 import { McpHost, LoadedTool } from "../providers/mcp-host.js";
 import { atDeclaredCapacity } from "../providers/inflight.js";
@@ -208,7 +208,7 @@ export class AgentRuntime {
 
     // SPEC-RAG-0001: recuperación determinística, nunca una decisión del LLM
     // vía tool calling — se dispara en cada turno de una conversación ya
-    // marcada como "RAG activa" por chat-ws.ts. Silenciosa: no se expone en
+    // marcada como "RAG activa" por la sesión Portal. Silenciosa: no se expone en
     // la UI qué fragmentos se recuperaron (a diferencia de OCR).
     if (ragActive) {
       const ragContext = await this.queryRagContext(message.content, preferences);
@@ -218,7 +218,7 @@ export class AgentRuntime {
     }
 
     // SPEC-KB-0001/SPEC-KB-0002: kbProviderIds ya viene resuelto por
-    // chat-ws.ts — modo manual (preferences.kb, un solo id) o modo
+    // la sesión Portal — modo manual (preferences.kb, un solo id) o modo
     // recomendado/límite ya confirmado por el usuario (kb.decision, uno o
     // varios ids). Nunca el LLM decide qué KB(s) usar sin que el usuario
     // haya visto y confirmado cuáles se van a consultar.
@@ -385,7 +385,7 @@ export class AgentRuntime {
 
   /**
    * Indexa un documento ya confirmado en un rag-provider (SPEC-RAG-0001) —
-   * llamado por chat-ws.ts en el mismo instante en que se resuelve
+   * llamado por la sesión Portal en el mismo instante en que se resuelve
    * `attachment.decision { use: true }`, nunca antes ni de forma
    * especulativa. Degradación graceful: si no hay ningún rag-provider en el
    * scope del usuario, simplemente no hay RAG disponible para esta
@@ -592,7 +592,7 @@ export class AgentRuntime {
    * (SPEC-KB-0002) — top-N determinístico sobre el umbral; si ninguna
    * califica, el LLM elige una sola vez entre TODAS las KBs registradas
    * (paso 5), con el mismo parser tolerante ya usado para tool-calling.
-   * `chat-ws.ts` llama esto para construir la confirmación `kb.recommended`
+   * La sesión Portal llama esto para construir la confirmación `kb.recommended`
    * — nunca se consulta nada sin que el usuario la haya visto antes.
    */
   async resolveKbCandidates(

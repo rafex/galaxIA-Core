@@ -1,6 +1,6 @@
 /** Eventos recibidos por la interfaz local. No son parte del protocolo FHS. */
 
-import type { KbCitation } from "@rafex/galaxia-fhs-protocol";
+import type { KbCitation } from "@rafex/galaxia-fhs-protocol/types";
 
 export interface ProvenanceInfo {
   llm: { providerId: string; providerName: string; model: string };

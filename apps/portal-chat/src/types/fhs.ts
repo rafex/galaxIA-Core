@@ -1,6 +1,5 @@
 import type { AgentEvent, ProvenanceInfo } from "./agent-events.js";
-
-export * from "@rafex/galaxia-fhs-protocol";
+export type { KbCitation, UserMessage } from "@rafex/galaxia-fhs-protocol/types";
 
 export type ChatMessage =
   | { role: "user"; content: string; attachmentName?: string; attachmentIsPdf?: boolean }

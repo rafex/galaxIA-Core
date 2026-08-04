@@ -1,5 +1,21 @@
-import type { AgentEvent, UserMessage } from "../types/fhs.js";
-import { getOrCreateDeviceId } from "./device-id.js";
+import { create } from "@bufbuild/protobuf";
+import { generateKeyPair, publicKeyFromRaw } from "@libp2p/crypto/keys";
+import { identify } from "@libp2p/identify";
+import { webSockets } from "@libp2p/websockets";
+import { noise } from "@chainsafe/libp2p-noise";
+import { yamux } from "@chainsafe/libp2p-yamux";
+import { createLibp2p } from "libp2p";
+import { multiaddr } from "@multiformats/multiaddr";
+import { base58btc } from "multiformats/bases/base58";
+import type { AgentEvent } from "../types/fhs.js";
+import * as FhsProto from "@rafex/galaxia-fhs-protocol/generated";
+import {
+  decodeEnvelopeFrame,
+  encodeEnvelopeFrame,
+  encodeMessage,
+  newEnvelope,
+} from "@rafex/galaxia-fhs-protocol/wire";
+import { FHS_STREAM_PROTOCOL } from "@rafex/galaxia-fhs-protocol/constants";
 
 export interface ApiOptions {
   conversationId?: string;
@@ -28,113 +44,299 @@ export interface ChatConnection {
   close(): void;
 }
 
-const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/chat/ws`;
+interface P2pStream extends AsyncIterable<unknown> {
+  send(data: Uint8Array): void;
+}
 
-/**
- * Si el socket muere por cualquier razón (el server se reinicia, la red
- * falla un instante, la laptop se durmió) hay que reconectar solo — sin
- * esto, `ready` se quedaba en `true` para siempre tras el primer `open`, y
- * cada envío siguiente llamaba `socket.send()` sobre un socket ya cerrado:
- * el mensaje se perdía en silencio, sin error visible para el usuario (bug
- * real encontrado en producción, 2026-08-01 — un mensaje enviado durante
- * un redeploy del Portal se quedó sin respuesta, sin ningún error en UI).
- */
+interface P2pNode {
+  dial(address: unknown): Promise<{ newStream(protocol: string): Promise<P2pStream> }>;
+  stop(): Promise<void>;
+}
+
+type P2pPrivateKey = Awaited<ReturnType<typeof generateKeyPair>>;
+
+const NAVIGATOR_MULTIADDR =
+  (import.meta.env.VITE_FHS_NAVIGATOR_MULTIADDR as string | undefined) ??
+  localStorage.getItem("fhs.navigator.multiaddr") ??
+  "";
+
 export function connectToChat(
   onEvent: (event: AgentEvent) => void,
-  onOpen?: () => void
+  onOpen?: () => void,
 ): ChatConnection {
-  let socket: WebSocket;
-  let ready = false;
+  let node: P2pNode | undefined;
+  let stream: P2pStream | undefined;
   let pending: ApiOptions | null = null;
   let closedByCaller = false;
+  const sessionId = crypto.randomUUID();
+  let ready = false;
+  let privateKey: P2pPrivateKey | undefined;
+  let sourcePeerId = "";
 
-  function openSocket() {
-    socket = new WebSocket(WS_URL);
+  void openSession();
 
-    socket.addEventListener("open", () => {
-      ready = true;
-      if (pending) {
-        const toSend = pending;
-        pending = null;
-        send(toSend);
-      }
-      onOpen?.();
-    });
-
-    socket.addEventListener("message", (event: MessageEvent<string>) => {
-      try {
-        const payload = JSON.parse(event.data) as AgentEvent;
-        onEvent(payload);
-      } catch (err) {
-        console.error("Failed to parse WebSocket event", err);
-      }
-    });
-
-    socket.addEventListener("error", (err) => {
-      console.error("WebSocket error", err);
-      ready = false;
-      onEvent({ type: "error", data: { code: "WS_ERROR", message: "Error de conexión" } });
-    });
-
-    socket.addEventListener("close", () => {
-      ready = false;
-      if (closedByCaller) return;
-      onEvent({ type: "error", data: { code: "WS_CLOSED", message: "Conexión cerrada" } });
-    });
-  }
-
-  openSocket();
-
-  function send(options: ApiOptions) {
-    const msg: {
-      type: "start";
-      conversationId?: string;
-      deviceId: string;
-      message: UserMessage;
-      artifacts: string[];
-      attachmentName?: string;
-      preferences: NonNullable<ApiOptions["preferences"]>;
-    } = {
-      type: "start",
-      conversationId: options.conversationId,
-      deviceId: getOrCreateDeviceId(),
-      message: { role: "user", content: options.message },
-      artifacts: options.artifacts || [],
-      attachmentName: options.attachmentName,
-      preferences: options.preferences || {},
-    };
-
-    if (ready) {
-      socket.send(JSON.stringify(msg));
+  async function openSession(): Promise<void> {
+    if (!NAVIGATOR_MULTIADDR) {
+      onEvent({ type: "error", data: { code: "P2P_CONFIG", message: "Falta VITE_FHS_NAVIGATOR_MULTIADDR o fhs.navigator.multiaddr" } });
       return;
     }
 
-    // Socket no listo (nunca conectó, o se cayó) — reconecta y encola.
-    pending = options;
-    if (socket.readyState !== WebSocket.CONNECTING) {
-      openSocket();
+    try {
+      privateKey = await generateKeyPair("Ed25519");
+      sourcePeerId = didFromRaw(privateKey.publicKey.raw);
+      node = await createLibp2p({
+        privateKey,
+        addresses: { listen: [] },
+        transports: [webSockets()],
+        connectionEncrypters: [noise()],
+        streamMuxers: [yamux()],
+        services: { identify: identify() },
+      }) as unknown as P2pNode;
+      const connection = await node.dial(multiaddr(NAVIGATOR_MULTIADDR));
+      const openedStream = await connection.newStream(FHS_STREAM_PROTOCOL);
+      stream = openedStream;
+
+      await sendEnvelope(openedStream, makeHandshake(privateKey.publicKey.raw), privateKey);
+      void readFrames(privateKey.publicKey.raw);
+    } catch (error) {
+      onEvent({ type: "error", data: { code: "P2P_CONNECT", message: error instanceof Error ? error.message : String(error) } });
     }
   }
 
-  function sendDecision(conversationId: string, use: boolean) {
-    if (ready) {
-      socket.send(JSON.stringify({ type: "attachment.decision", conversationId, use }));
+  async function readFrames(publicKey: Uint8Array): Promise<void> {
+    if (!stream) return;
+    let buffer = new Uint8Array();
+    try {
+      for await (const chunk of stream) {
+        const bytes = chunk instanceof Uint8Array ? chunk : (chunk as { subarray(): Uint8Array }).subarray();
+        const joined = new Uint8Array(buffer.byteLength + bytes.byteLength);
+        joined.set(buffer);
+        joined.set(bytes, buffer.byteLength);
+        buffer = joined;
+
+        while (buffer.byteLength > 0) {
+          try {
+            const decoded = decodeEnvelopeFrame(buffer);
+            buffer = buffer.slice(decoded.bytesConsumed);
+            if (!await verifyEnvelope(decoded.envelope, publicKey)) continue;
+            handleEnvelope(decoded.envelope);
+          } catch (error) {
+            if (error instanceof Error && error.message.includes("incompleto")) break;
+            throw error;
+          }
+        }
+      }
+      if (!closedByCaller) onEvent({ type: "error", data: { code: "P2P_CLOSED", message: "Sesión libp2p cerrada" } });
+    } catch (error) {
+      if (!closedByCaller) onEvent({ type: "error", data: { code: "P2P_STREAM", message: error instanceof Error ? error.message : String(error) } });
     }
   }
 
-  function sendKbDecision(conversationId: string, use: boolean) {
-    if (ready) {
-      socket.send(JSON.stringify({ type: "kb.decision", conversationId, use }));
+  function handleEnvelope(envelope: FhsProto.Envelope): void {
+    switch (envelope.payload.case) {
+      case "handshakeAck":
+        ready = true;
+        if (pending) {
+          const next = pending;
+          pending = null;
+          send(next);
+        }
+        onOpen?.();
+        break;
+      case "agentStatus":
+        onEvent({ type: "agent.status", data: { conversationId: envelope.payload.value.missionId, status: envelope.payload.value.status, message: envelope.payload.value.status } });
+        break;
+      case "starSelected":
+        onEvent({ type: "llm.selected", data: { conversationId: envelope.payload.value.missionId, providerId: envelope.payload.value.providerId, providerName: envelope.payload.value.providerId, modelId: envelope.payload.value.model, reason: [] } });
+        break;
+      case "toolSelected":
+        onEvent({ type: "tool.selected", data: { conversationId: envelope.payload.value.missionId, capability: envelope.payload.value.capabilityId, providerId: envelope.payload.value.providerId, providerName: envelope.payload.value.providerId } });
+        break;
+      case "assistantDelta":
+        onEvent({ type: "assistant.delta", data: { conversationId: envelope.payload.value.missionId, text: envelope.payload.value.delta } });
+        break;
+      case "assistantCompleted": {
+        const provenance = envelope.payload.value.provenance;
+        if (!provenance) break;
+        onEvent({ type: "assistant.completed", data: { conversationId: envelope.payload.value.missionId, provenance: {
+          llm: { providerId: provenance.providerId, providerName: provenance.providerId, model: provenance.model },
+          tools: provenance.toolProviderIds.map((providerId) => ({ capability: "tool", providerId, providerName: providerId })),
+          dataExported: provenance.dataExported ? "true" : "Ninguno",
+          jurisdiction: provenance.jurisdiction,
+        } } });
+        break;
+      }
+      case "ocrExtracted":
+        onEvent({ type: "ocr.extracted", data: { conversationId: envelope.payload.value.missionId, filename: envelope.payload.value.filename, text: envelope.payload.value.text } });
+        break;
+      case "kbRecommended":
+        onEvent({ type: "kb.recommended", data: {
+          conversationId: envelope.payload.value.missionId,
+          candidates: envelope.payload.value.candidates.map((candidate) => ({ providerId: candidate.providerId, providerName: candidate.providerName, description: candidate.description })),
+          chosenByLlm: envelope.payload.value.chosenByLlm,
+        } });
+        break;
+      case "error":
+        onEvent({ type: "error", data: { conversationId: sessionId, code: String(envelope.payload.value.code), message: envelope.payload.value.message } });
+        break;
+      default:
+        break;
     }
+  }
+
+  function send(options: ApiOptions): void {
+    if (!ready) {
+      pending = options;
+      return;
+    }
+    const preferences = options.preferences ?? {};
+    void (async () => {
+      if (!stream || !privateKey) return;
+      await sendEnvelope(stream, newEnvelope({
+      sourcePeerId,
+      destPeerId: "",
+      payload: {
+        case: "agentStart",
+        value: create(FhsProto.AgentStartMessageSchema, {
+          sessionId,
+          scope: preferences.scope ?? "community",
+          model: preferences.model ?? "",
+          ocrMode: preferences.ocrMode ?? "confirm",
+          kb: preferences.kb ?? "",
+          kbMaxPerQuestion: preferences.kbMaxPerQuestion ?? 1,
+          ipfsEnabled: preferences.ipfs?.enabled ?? false,
+          ipfsNetwork: preferences.ipfs?.network ?? "public",
+          ipfsRetention: preferences.ipfs?.retention ?? "ephemeral",
+        }),
+      },
+      }), privateKey);
+      await sendChatRequest(options);
+    })().catch((error: unknown) => {
+      onEvent({ type: "error", data: { conversationId: sessionId, code: "P2P_SEND", message: error instanceof Error ? error.message : String(error) } });
+    });
+  }
+
+  async function sendChatRequest(options: ApiOptions): Promise<void> {
+    if (!stream || !privateKey) return;
+    await sendEnvelope(stream, newEnvelope({
+      sourcePeerId,
+      payload: {
+        case: "chatRequest",
+        value: create(FhsProto.ChatRequestMessageSchema, {
+          missionId: sessionId,
+          messages: [create(FhsProto.MessageSchema, { role: "user", content: options.message })],
+          model: options.preferences?.model ?? "",
+          artifacts: toInlineArtifacts(options.artifacts, options.attachmentName),
+        }),
+      },
+    }), privateKey);
   }
 
   return {
     send,
-    sendDecision,
-    sendKbDecision,
+    sendDecision: (conversationId: string, use: boolean) => {
+      void sendControlEnvelope({ case: "attachmentDecision", value: create(FhsProto.AttachmentDecisionMessageSchema, { missionId: conversationId, use }) });
+    },
+    sendKbDecision: (conversationId: string, use: boolean) => {
+      void sendControlEnvelope({ case: "kbDecision", value: create(FhsProto.KbDecisionMessageSchema, { missionId: conversationId, use }) });
+    },
     close: () => {
       closedByCaller = true;
-      socket.close();
+      ready = false;
+      void node?.stop();
     },
   };
+
+  async function sendControlEnvelope(payload: FhsProto.Envelope["payload"]): Promise<void> {
+    if (!stream || !privateKey || !ready) return;
+    await sendEnvelope(stream, newEnvelope({ sourcePeerId, payload }), privateKey);
+  }
+}
+
+async function sendEnvelope(stream: P2pStream, envelope: FhsProto.Envelope, privateKey: { sign(data: Uint8Array): Uint8Array | Promise<Uint8Array> }): Promise<void> {
+  if (!envelope.payload.case) return;
+  const payload = encodePayload(envelope.payload);
+  const signature = await privateKey.sign(new TextEncoder().encode(signaturePayload(
+    envelope.messageId,
+    envelope.sourcePeerId,
+    envelope.destPeerId,
+    Number(envelope.timestamp),
+    bytesToHex(payload),
+  )));
+  const sealed = create(FhsProto.EnvelopeSchema, { ...envelope, signature });
+  stream.send(encodeEnvelopeFrame(sealed));
+}
+
+function makeHandshake(rawPublicKey: Uint8Array): FhsProto.Envelope {
+  return newEnvelope({
+    sourcePeerId: didFromRaw(rawPublicKey),
+    payload: {
+      case: "handshake",
+      value: create(FhsProto.HandshakeMessageSchema, {
+        fhsVersion: "0.1",
+        listenAddrs: [],
+          beacon: create(FhsProto.BeaconSchema, {
+          fhsVersion: "0.1",
+          provider: create(FhsProto.ProviderIdentitySchema, { id: didFromRaw(rawPublicKey), type: FhsProto.ProviderType.MULTI, visibility: FhsProto.Visibility.COMMUNITY, name: "Portal" }),
+        }),
+      }),
+    },
+  });
+}
+
+function didFromRaw(raw: Uint8Array): string {
+  return `did:key:${base58btc.encode(Uint8Array.from([0xed, 0x01, ...raw]))}`;
+}
+
+function encodePayload(payload: FhsProto.Envelope["payload"]): Uint8Array {
+  const schemas = {
+    handshake: FhsProto.HandshakeMessageSchema,
+    handshakeAck: FhsProto.HandshakeAckMessageSchema,
+    agentStart: FhsProto.AgentStartMessageSchema,
+    chatRequest: FhsProto.ChatRequestMessageSchema,
+    chatCancel: FhsProto.ChatCancelMessageSchema,
+    agentStatus: FhsProto.AgentStatusMessageSchema,
+    starSelected: FhsProto.StarSelectedMessageSchema,
+    toolSelected: FhsProto.ToolSelectedMessageSchema,
+    assistantDelta: FhsProto.AssistantDeltaMessageSchema,
+    assistantCompleted: FhsProto.AssistantCompletedMessageSchema,
+    ocrExtracted: FhsProto.OcrExtractedMessageSchema,
+    kbRecommended: FhsProto.KbRecommendedMessageSchema,
+    attachmentDecision: FhsProto.AttachmentDecisionMessageSchema,
+    kbDecision: FhsProto.KbDecisionMessageSchema,
+    error: FhsProto.ErrorMessageSchema,
+  } as const;
+  if (!payload.case) return new Uint8Array();
+  return encodeMessage(schemas[payload.case as keyof typeof schemas], payload.value as never);
+}
+
+async function verifyEnvelope(envelope: FhsProto.Envelope, _ownPublicKey: Uint8Array): Promise<boolean> {
+  if (!envelope.sourcePeerId || envelope.signature.byteLength === 0) return false;
+  const encoded = base58btc.decode(envelope.sourcePeerId.slice("did:key:".length));
+  if (encoded[0] !== 0xed || encoded[1] !== 0x01) return false;
+  const publicKey = publicKeyFromRaw(encoded.slice(2));
+  const payload = encodePayload(envelope.payload);
+  const signed = new TextEncoder().encode(signaturePayload(envelope.messageId, envelope.sourcePeerId, envelope.destPeerId, Number(envelope.timestamp), bytesToHex(payload)));
+  return await publicKey.verify(signed, envelope.signature);
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function signaturePayload(messageId: string, sourcePeerId: string, destPeerId: string, timestamp: number, payloadBytesHex: string): string {
+  return `${messageId}:${sourcePeerId}:${destPeerId}:${timestamp}:${payloadBytesHex}`;
+}
+
+function toInlineArtifacts(artifacts: string[] | undefined, filename: string | undefined): FhsProto.ArtifactRef[] {
+  return (artifacts ?? []).map((artifact) => {
+    const [, encoded] = artifact.split(",", 2);
+    const bytes = Uint8Array.from(atob(encoded ?? artifact), (character) => character.charCodeAt(0));
+    return create(FhsProto.ArtifactRefSchema, {
+      transport: {
+        case: "inline",
+        value: create(FhsProto.InlineArtifactSchema, { data: bytes, filename: filename ?? "archivo adjunto" }),
+      },
+    });
+  });
 }

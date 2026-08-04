@@ -43,7 +43,7 @@ export interface P2pProviders {
 
 const ADVERTISE_INTERVAL_MS = 30_000;
 
-export async function initP2pProviders(config: P2pConfig, eventBus?: import("../sse/event-bus.js").EventBus): Promise<P2pProviders> {
+export async function initP2pProviders(config: P2pConfig, eventBus?: import("../events/event-bus.js").EventBus): Promise<P2pProviders> {
   const identity = await loadOrCreateFhsIdentity(config.identityKeyPath);
   configureSigner(identity.did, identity.privateKey);
   console.log(`[navigator-p2p] DID: ${identity.did}`);

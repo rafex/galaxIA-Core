@@ -5,21 +5,6 @@ import { createDrawerGroup } from "./drawer.js";
 import { initTooltips, refreshTooltip } from "./tooltip.js";
 import { createTour, hasTourRun, type TourStep } from "./tour.js";
 
-interface ModelOption {
-  modelId: string;
-  displayName: string;
-  providerId: string;
-  providerName: string;
-  /** DEC-0031: true si el operador del Agent Server marcó este nodo como de confianza. */
-  trusted?: boolean;
-}
-
-interface KbOption {
-  providerId: string;
-  providerName: string;
-  description: string;
-}
-
 export function createApp(container: HTMLElement, version: string = "unknown") {
   const state: ChatState = {
     messages: [],
@@ -245,9 +230,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     setTimeout(() => tour.start(), 400);
   }
 
-  void loadModels();
-  void loadKbs();
-  void loadIpfsConfig();
+  configureIpfsSettings();
 
   modelSelector.addEventListener("change", () => {
     state.selectedModel = modelSelector.value;
@@ -315,69 +298,16 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     attachBtn.classList.add("attached");
   })());
 
-  async function loadModels() {
-    try {
-      const response = await fetch("/api/fhs/models");
-      if (!response.ok) return;
-      const data = (await response.json()) as { models?: ModelOption[] };
-      for (const m of data.models ?? []) {
-        const option = document.createElement("option");
-        option.value = m.modelId;
-        option.textContent = `${m.trusted ? "★ " : ""}${m.displayName} — ${m.providerName}`;
-        modelSelector.appendChild(option);
-      }
-    } catch (err) {
-      console.error("Failed to load models", err);
+  /** La configuración IPFS es local/build-time; no se consulta por HTTP. */
+  function configureIpfsSettings() {
+    const gateway = import.meta.env.VITE_FHS_IPFS_GATEWAY_URL as string | undefined;
+    const ipfsOption = ipfsModeSelector.querySelector('option[value="ipfs"]') as HTMLOptionElement;
+    if (!gateway) {
+      ipfsOption.disabled = true;
+      ipfsOption.textContent = "Vía IPFS (configuración local no disponible)";
+      return;
     }
-  }
-
-  async function loadKbs() {
-    try {
-      const response = await fetch("/api/fhs/providers?type=mcp");
-      if (!response.ok) return;
-      const providers = (await response.json()) as Array<{
-        providerId: string;
-        name: string;
-        service: { capabilities: Array<{ id: string; description?: string }> };
-      }>;
-      const kbs: KbOption[] = providers
-        .map((p) => {
-          const cap = p.service.capabilities.find((c) => c.id === "kb.query");
-          return cap ? { providerId: p.providerId, providerName: p.name, description: cap.description || p.name } : null;
-        })
-        .filter((kb): kb is KbOption => kb !== null);
-
-      for (const kb of kbs) {
-        const option = document.createElement("option");
-        option.value = kb.providerId;
-        option.textContent = `${kb.providerName} — ${kb.description}`;
-        kbSelector.appendChild(option);
-      }
-    } catch (err) {
-      console.error("Failed to load KBs", err);
-    }
-  }
-
-  /**
-   * SPEC-IPFS-0001 (DEC-0052, pregunta #6): el usuario debe saber qué
-   * gateway público se usará antes de elegir ese transporte, no un detalle
-   * oculto. Si Navigator no tiene IPFS configurado, se deshabilita la
-   * opción en vez de dejar que el usuario elija algo que va a fallar.
-   */
-  async function loadIpfsConfig() {
-    try {
-      const response = await fetch("/api/ipfs-config");
-      const data = (await response.json()) as { enabled: boolean; publicGatewayUrl: string };
-      if (!data.enabled) {
-        const ipfsOption = ipfsModeSelector.querySelector('option[value="ipfs"]') as HTMLOptionElement;
-        ipfsOption.disabled = true;
-        ipfsOption.textContent = "Vía IPFS (no disponible en este nodo)";
-        return;
-      }
-      ipfsGatewayInfo.textContent = `Gateway público: ${data.publicGatewayUrl}`;
-    } catch (err) {
-      console.error("Failed to load IPFS config", err);
-    }
+    ipfsGatewayInfo.textContent = `Gateway público: ${gateway}`;
   }
 
   function submitMessage() {

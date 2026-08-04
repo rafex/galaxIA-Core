@@ -1,13 +1,8 @@
 #!/usr/bin/env node
 import Fastify, { type FastifyInstance } from "fastify";
-import websocket from "@fastify/websocket";
 import { readFileSync } from "node:fs";
 import { FHS_VERSION } from "@rafex/galaxia-fhs-protocol";
-import { setupChatApi } from "./api/chat.js";
-import { setupEventsApi } from "./api/events.js";
-import { setupChatWebSocket } from "./api/chat-ws.js";
-import { EventBus } from "./sse/event-bus.js";
-import { isIpfsConfigured, getPublicGatewayUrl } from "./ipfs/ipfs-client.js";
+import { EventBus } from "./events/event-bus.js";
 import versionInfo from "./version.json" with { type: "json" };
 import { initP2pProviders } from "./p2p/index.js";
 
@@ -38,33 +33,22 @@ async function main() {
       : Fastify({ logger: true })
   ) as FastifyInstance;
 
-  await app.register(websocket);
-
   const eventBus = new EventBus();
 
   // FHS solo tiene un camino de descubrimiento y ejecución: libp2p.
   app.log.info("[navigator-p2p] Modo libp2p activo");
-  const p2pProviders = await initP2pProviders({
+  await initP2pProviders({
     identityKeyPath: IDENTITY_KEY_PATH,
     listenAddrs: FHS_LISTEN_ADDRS,
     announceAddrs: FHS_ANNOUNCE_ADDRS,
     bootstrapAddrs: FHS_BOOTSTRAP_ADDRS,
   }, eventBus);
 
-  setupEventsApi(app, eventBus);
-  setupChatApi(app, p2pProviders.atlasClient, eventBus, p2pProviders);
-  setupChatWebSocket(app, p2pProviders.atlasClient, eventBus, p2pProviders);
-
   app.get("/health", () => ({
     ok: true,
     fhsVersion: FHS_VERSION,
     version: versionInfo.commit,
     buildDate: versionInfo.date,
-  }));
-
-  app.get("/api/ipfs-config", () => ({
-    enabled: isIpfsConfigured(),
-    publicGatewayUrl: getPublicGatewayUrl(),
   }));
 
   try {

@@ -24,7 +24,6 @@
   "dependencies": {
     "@chainsafe/libp2p-noise": "17.0.0",
     "@chainsafe/libp2p-yamux": "8.0.1",
-    "@fastify/websocket": "11.3.0",
     "@libp2p/crypto": "5.1.22",
     "@libp2p/gossipsub": "^16.1.1",
     "@libp2p/identify": "^4.1.12",
@@ -33,7 +32,7 @@
     "@libp2p/ping": "^3.1.11",
     "@libp2p/websockets": "10.1.19",
     "@rafex/galaxia-fhs-node": "*",
-    "@rafex/galaxia-fhs-protocol": "npm:@rafex_labs/galaxia-fhs-protocol@^0.1.30",
+    "@rafex/galaxia-fhs-protocol": "npm:@rafex_labs/galaxia-fhs-protocol@^0.1.33",
     "@multiformats/multiaddr": "13.0.3",
     "fastify": "5.10.0",
     "it-length-prefixed": "11.0.1",
