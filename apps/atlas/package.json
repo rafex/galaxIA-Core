@@ -3,7 +3,7 @@
   "version": "0.1.8",
   "private": false,
   "type": "module",
-  "description": "Atlas FHS P2P: pure bootstrap peer (DHT server + FloodSub) para el swarm FHS.",
+  "description": "Atlas FHS P2P: pure bootstrap peer (DHT server + GossipSub) para el swarm FHS.",
   "bin": {
     "galaxia-atlas": "./dist/index.js"
   },

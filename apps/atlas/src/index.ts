@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Atlas FHS P2P — pure bootstrap peer.
- * Levanta un nodo libp2p (DHT server + FloodSub) para que otros nodos se
+ * Levanta un nodo libp2p (DHT server + GossipSub) para que otros nodos se
  * unan al swarm y exponé una REST API mínima para observabilidad/health.
  *
  * No tiene WebSocket registry ni handlers hello/register/ping (DEC-0088).

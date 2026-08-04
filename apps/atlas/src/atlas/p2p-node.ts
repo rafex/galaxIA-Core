@@ -4,9 +4,9 @@
  * y almacena registros DHT para que otros nodos encuentren sus BeaconRecords.
  * No tiene WebSocket registry ni handlers hello/register/ping.
  *
- * FloodSub relay: Atlas suscribe a todos los topics del protocolo FHS para
+ * GossipSub relay: Atlas suscribe a todos los topics del protocolo FHS para
  * que los mensajes entre Star y Navigator fluyan a través de él. Sin esta
- * suscripción, FloodSub no enruta mensajes entre peers que no están
+ * suscripción, GossipSub enruta mensajes entre peers que no están
  * directamente conectados entre sí (solo el nodo suscrito recibe el mensaje).
  */
 

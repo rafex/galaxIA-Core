@@ -1,11 +1,7 @@
 /**
  * Factory que levanta un nodo libp2p con el stack canónico FHS:
- *   WSS transport + Noise + yamux + Kademlia DHT + FloodSub + Identify.
+ *   WSS transport + Noise + yamux + Kademlia DHT + GossipSub + Identify.
  * En tests, pasar un transport de memoria en lugar de webSockets.
- *
- * PubSub: usa @libp2p/floodsub (compatible con @libp2p/interface@^3).
- * @chainsafe/libp2p-gossipsub aún requiere @libp2p/interface@^2 (incompatible
- * con libp2p@3). Migrar a gossipsub cuando el ecosistema actualice a ^3.
  *
  * DHT: registra validators/selectors FHS para namespace "/fhs/*".
  * KadDHT solo acepta claves de namespaces registrados ("/pk/" e "/ipns/" por
@@ -17,7 +13,7 @@ import { webSockets } from "@libp2p/websockets";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { kadDHT } from "@libp2p/kad-dht";
-import { floodsub } from "@libp2p/floodsub";
+import { gossipsub } from "@libp2p/gossipsub";
 import { identify } from "@libp2p/identify";
 import { ping } from "@libp2p/ping";
 import { multiaddr } from "@multiformats/multiaddr";
@@ -91,7 +87,7 @@ export async function createFhsNode(config: FhsNodeConfig): Promise<FhsNode> {
         validators: { fhs: (_k: Uint8Array, _v: Uint8Array) => {} },
         selectors: { fhs: (_k: Uint8Array, _rs: Uint8Array[]) => 0 },
       }),
-      pubsub: floodsub(),
+      pubsub: gossipsub(),
     },
   });
 

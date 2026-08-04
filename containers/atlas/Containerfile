@@ -1,5 +1,5 @@
 # Contenedor de Atlas (Bootstrap Peer) FHS P2P — DEC-0088
-# Pure libp2p bootstrap peer: DHT server + FloodSub relay.
+# Pure libp2p bootstrap peer: DHT server + GossipSub relay.
 # Puerto 8081: API REST de health/status.
 # Puerto 4001: WebSocket libp2p (bootstrap multiaddr).
 #

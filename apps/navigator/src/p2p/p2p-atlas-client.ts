@@ -6,7 +6,7 @@
  *
  * getProviders("llm") → stars del peer-cache
  * getProviders("mcp") → satellites del peer-cache
- * recordSample() → no-op (la telemetría P2P se hará via ReputationUpdate FloodSub)
+ * recordSample() → no-op (la telemetría P2P se hará via ReputationUpdate GossipSub)
  */
 
 import type { PublishedService } from "@rafex/galaxia-fhs-protocol";

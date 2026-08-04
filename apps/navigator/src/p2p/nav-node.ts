@@ -9,7 +9,7 @@ import { webSockets } from "@libp2p/websockets";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { kadDHT } from "@libp2p/kad-dht";
-import { floodsub } from "@libp2p/floodsub";
+import { gossipsub } from "@libp2p/gossipsub";
 import { identify } from "@libp2p/identify";
 import { ping } from "@libp2p/ping";
 import {
@@ -205,7 +205,7 @@ export async function createNavNode(config: NavNodeConfig): Promise<FhsNode> {
         validators: { fhs: (_k: Uint8Array, _v: Uint8Array) => {} },
         selectors: { fhs: (_k: Uint8Array, _rs: Uint8Array[]) => 0 },
       }),
-      pubsub: floodsub(),
+      pubsub: gossipsub(),
     },
   });
 

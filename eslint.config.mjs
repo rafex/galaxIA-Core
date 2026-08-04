@@ -41,7 +41,7 @@ export default tseslint.config(
   },
   {
     // FhsNode se tipifica como `any` por el conflicto documentado entre
-    // @libp2p/interface@^2 (floodsub/gossipsub pre-3.x) y @libp2p/interface@^3
+    // @libp2p/interface@^3 (GossipSub y libp2p actuales)
     // (libp2p@3.x). Se relajan las reglas no-unsafe-* en los paquetes que usan
     // @rafex/galaxia-fhs-node (que re-exporta FhsNode = any).
     files: ["packages/fhs-node/**/*.ts", "apps/atlas/**/*.ts"],
