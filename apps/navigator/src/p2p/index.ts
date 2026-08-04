@@ -22,6 +22,7 @@ import { configureSigner, dhtBeaconCodec, makeNavigatorBeacon, missionBidCodec, 
 import { P2pAtlasClient } from "./p2p-atlas-client.js";
 import { P2pLlmGateway } from "./p2p-llm-gateway.js";
 import { P2pMcpHost } from "./p2p-mcp-host.js";
+import { registerPortalSession } from "./portal-session.js";
 import {
   TOPIC_NODES_ADVERTISE,
   TOPIC_MISSIONS_BID,
@@ -42,7 +43,7 @@ export interface P2pProviders {
 
 const ADVERTISE_INTERVAL_MS = 30_000;
 
-export async function initP2pProviders(config: P2pConfig): Promise<P2pProviders> {
+export async function initP2pProviders(config: P2pConfig, eventBus?: import("../sse/event-bus.js").EventBus): Promise<P2pProviders> {
   const identity = await loadOrCreateFhsIdentity(config.identityKeyPath);
   configureSigner(identity.did, identity.privateKey);
   console.log(`[navigator-p2p] DID: ${identity.did}`);
@@ -108,6 +109,12 @@ export async function initP2pProviders(config: P2pConfig): Promise<P2pProviders>
   const p2pAtlas = new P2pAtlasClient(peerCache);
   const p2pLlm = new P2pLlmGateway(node, identity, bidCollector);
   const p2pMcp = new P2pMcpHost(node, identity, bidCollector, peerCache);
+
+  if (eventBus) registerPortalSession(node, identity, eventBus, {
+    atlasClient: p2pAtlas,
+    llmGateway: p2pLlm,
+    mcpHost: p2pMcp,
+  });
 
   return {
     atlasClient: p2pAtlas,

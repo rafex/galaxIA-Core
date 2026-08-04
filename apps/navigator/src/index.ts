@@ -49,7 +49,7 @@ async function main() {
     listenAddrs: FHS_LISTEN_ADDRS,
     announceAddrs: FHS_ANNOUNCE_ADDRS,
     bootstrapAddrs: FHS_BOOTSTRAP_ADDRS,
-  });
+  }, eventBus);
 
   setupEventsApi(app, eventBus);
   setupChatApi(app, p2pProviders.atlasClient, eventBus, p2pProviders);
