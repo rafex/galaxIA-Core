@@ -8,16 +8,18 @@
     "galaxia-portal-chat": "./dist/server.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "scripts"
   ],
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "npm run generate:cert && vite",
     "build": "sh ../../helpers/scripts/shell/gen-version.sh 2>/dev/null || true; tsc && vite build && tsc -p tsconfig.server.json",
-    "start": "node dist/server.js",
-    "preview": "vite preview",
+    "start": "node scripts/generate-dev-cert.mjs && node dist/server.js",
+    "preview": "npm run generate:cert && vite preview",
+    "generate:cert": "node scripts/generate-dev-cert.mjs",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "lint": "eslint src/",
     "test": "vitest run --passWithNoTests"
