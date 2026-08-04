@@ -318,8 +318,9 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   async function loadModels() {
     try {
       const response = await fetch("/api/fhs/models");
-      const data = (await response.json()) as { models: ModelOption[] };
-      for (const m of data.models) {
+      if (!response.ok) return;
+      const data = (await response.json()) as { models?: ModelOption[] };
+      for (const m of data.models ?? []) {
         const option = document.createElement("option");
         option.value = m.modelId;
         option.textContent = `${m.trusted ? "★ " : ""}${m.displayName} — ${m.providerName}`;
@@ -333,6 +334,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   async function loadKbs() {
     try {
       const response = await fetch("/api/fhs/providers?type=mcp");
+      if (!response.ok) return;
       const providers = (await response.json()) as Array<{
         providerId: string;
         name: string;
