@@ -8,12 +8,13 @@ import * as lp from "it-length-prefixed";
 import { decodeEnvelope, encodeEnvelopeFrame } from "@rafex/galaxia-fhs-protocol";
 import type { FhsProto } from "@rafex/galaxia-fhs-protocol";
 import type { FhsNode } from "./nav-node.js";
+import { sealEnvelope, verifyEnvelope } from "./p2p-wire.js";
 
 export type FhsEnvelope = FhsProto.Envelope;
 
 export function sendEnvelope(stream: FhsNode, envelope: FhsEnvelope): void {
   // encodeEnvelopeFrame ya aplica el mismo LPP que consume lp.decode.
-  stream.send(encodeEnvelopeFrame(envelope));
+  stream.send(encodeEnvelopeFrame(sealEnvelope(envelope)));
 }
 
 export async function* decodeStream(stream: FhsNode): AsyncGenerator<FhsEnvelope> {
@@ -22,7 +23,9 @@ export async function* decodeStream(stream: FhsNode): AsyncGenerator<FhsEnvelope
   for await (const chunk of decoded) {
     const data = chunk.slice();
     try {
-      yield decodeEnvelope(data);
+      const envelope = decodeEnvelope(data);
+      if (!verifyEnvelope(envelope)) continue;
+      yield envelope;
     } catch {
       // ignorar frames malformados
     }

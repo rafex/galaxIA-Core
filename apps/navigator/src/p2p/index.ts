@@ -18,7 +18,7 @@ import {
   pubsubPublish,
   dhtPut,
 } from "./nav-node.js";
-import { dhtBeaconCodec, makeNavigatorBeacon, missionBidCodec, nodeAdvertiseCodec } from "./p2p-wire.js";
+import { configureSigner, dhtBeaconCodec, makeNavigatorBeacon, missionBidCodec, nodeAdvertiseCodec } from "./p2p-wire.js";
 import { P2pAtlasClient } from "./p2p-atlas-client.js";
 import { P2pLlmGateway } from "./p2p-llm-gateway.js";
 import { P2pMcpHost } from "./p2p-mcp-host.js";
@@ -44,6 +44,7 @@ const ADVERTISE_INTERVAL_MS = 30_000;
 
 export async function initP2pProviders(config: P2pConfig): Promise<P2pProviders> {
   const identity = await loadOrCreateFhsIdentity(config.identityKeyPath);
+  configureSigner(identity.did, identity.privateKey);
   console.log(`[navigator-p2p] DID: ${identity.did}`);
 
   const node = await createNavNode({

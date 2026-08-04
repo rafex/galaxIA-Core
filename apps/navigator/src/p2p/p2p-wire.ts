@@ -5,16 +5,24 @@
  */
 
 import { create, type DescMessage, type MessageShape } from "@bufbuild/protobuf";
+import { createHash } from "node:crypto";
 import {
   FhsProto,
+  dhtBeaconSignaturePayload,
+  envelopeSignaturePayload,
   encodeMessage,
   decodeMessage,
+  missionAssignSignaturePayload,
+  missionBidSignaturePayload,
+  missionOfferSignaturePayload,
+  nodeAdvertiseSignaturePayload,
   newEnvelope,
   type GenerateRequest,
   type LlmMessage,
   type ToolDefinition as AppToolDefinition,
   type ToolCall as AppToolCall,
   type ToolParameterSchema,
+  verifySignature,
 } from "@rafex/galaxia-fhs-protocol";
 
 export function dynamicValueFromUnknown(value: unknown): FhsProto.DynamicValue {
@@ -62,6 +70,91 @@ export interface ProtoCodec<T> {
   decode(bytes: Uint8Array): T;
 }
 
+let signer: { did: string; privateKey: { sign(data: Uint8Array): Uint8Array } } | undefined;
+
+export function configureSigner(did: string, privateKey: unknown): void {
+  signer = { did, privateKey: privateKey as { sign(data: Uint8Array): Uint8Array } };
+}
+
+function envelopePayloadBytes(payload: FhsProto.Envelope["payload"]): Uint8Array {
+  if (payload.case === undefined) return new Uint8Array();
+  const schemas = {
+    handshake: FhsProto.HandshakeMessageSchema,
+    handshakeAck: FhsProto.HandshakeAckMessageSchema,
+    ping: FhsProto.PingMessageSchema,
+    pong: FhsProto.PongMessageSchema,
+    error: FhsProto.ErrorMessageSchema,
+    chatRequest: FhsProto.ChatRequestMessageSchema,
+    chatCancel: FhsProto.ChatCancelMessageSchema,
+    chatDelta: FhsProto.ChatDeltaMessageSchema,
+    chatCompleted: FhsProto.ChatCompletedMessageSchema,
+    chatError: FhsProto.ChatErrorMessageSchema,
+    dispatchAck: FhsProto.DispatchAckMessageSchema,
+    toolCall: FhsProto.ToolCallRequestMessageSchema,
+    toolCancel: FhsProto.ToolCancelMessageSchema,
+    toolResult: FhsProto.ToolCallResultMessageSchema,
+    toolError: FhsProto.ToolCallErrorMessageSchema,
+    toolList: FhsProto.ToolListRequestMessageSchema,
+    toolListResp: FhsProto.ToolListResponseMessageSchema,
+  } as const;
+  const schema = schemas[payload.case as keyof typeof schemas];
+  return encodeMessage(schema, payload.value as never);
+}
+
+export function sealEnvelope(envelope: FhsProto.Envelope): FhsProto.Envelope {
+  const payloadHex = Buffer.from(envelopePayloadBytes(envelope.payload)).toString("hex");
+  const signature = sign(envelopeSignaturePayload(
+    envelope.messageId,
+    envelope.sourcePeerId,
+    envelope.destPeerId,
+    Number(envelope.timestamp),
+    payloadHex
+  ));
+  return create(FhsProto.EnvelopeSchema, { ...envelope, signature });
+}
+
+export function verifyEnvelope(envelope: FhsProto.Envelope): boolean {
+  if (envelope.signature.byteLength === 0 || !envelope.sourcePeerId) return false;
+  const payloadHex = Buffer.from(envelopePayloadBytes(envelope.payload)).toString("hex");
+  return verifySignature(
+    envelope.sourcePeerId,
+    envelopeSignaturePayload(envelope.messageId, envelope.sourcePeerId, envelope.destPeerId, Number(envelope.timestamp), payloadHex),
+    Buffer.from(envelope.signature).toString("base64")
+  );
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function sign(payload: string): Uint8Array {
+  if (!signer) throw new Error("FHS wire signer no configurado");
+  return signer.privateKey.sign(new TextEncoder().encode(payload));
+}
+
+function signedCodec<T extends { signature: Uint8Array }>(
+  schema: DescMessage,
+  payload: (message: T) => string,
+  signerDid: (message: T) => string,
+  required = true
+): ProtoCodec<T> {
+  return {
+    encode: (message) => {
+      const unsigned = { ...message, signature: new Uint8Array() } as T;
+      const signature = signer ? sign(payload(unsigned)) : new Uint8Array();
+      return encodeMessage(schema, { ...unsigned, signature } as never);
+    },
+    decode: (bytes) => {
+      const message = decodeMessage(schema, bytes) as unknown as T;
+      if (required && message.signature.byteLength === 0) throw new Error("Firma FHS ausente");
+      if (required && !verifySignature(signerDid(message), payload(message), Buffer.from(message.signature).toString("base64"))) {
+        throw new Error("Firma FHS inválida");
+      }
+      return message;
+    },
+  };
+}
+
 export function protobufMessageCodec<Desc extends DescMessage>(schema: Desc): ProtoCodec<MessageShape<Desc>> {
   return {
     encode: (message) => encodeMessage(schema, message),
@@ -69,11 +162,34 @@ export function protobufMessageCodec<Desc extends DescMessage>(schema: Desc): Pr
   };
 }
 
-export const nodeAdvertiseCodec = protobufMessageCodec(FhsProto.NodeAdvertiseMessageSchema);
-export const missionOfferCodec = protobufMessageCodec(FhsProto.MissionOfferMessageSchema);
-export const missionBidCodec = protobufMessageCodec(FhsProto.MissionBidMessageSchema);
-export const missionAssignCodec = protobufMessageCodec(FhsProto.MissionAssignMessageSchema);
-export const dhtBeaconCodec = protobufMessageCodec(FhsProto.DhtBeaconRecordSchema);
+const beaconHash = (beacon: FhsProto.Beacon | undefined): string =>
+  sha256(encodeMessage(FhsProto.BeaconSchema, beacon ?? create(FhsProto.BeaconSchema)));
+
+export const nodeAdvertiseCodec = signedCodec<FhsProto.NodeAdvertiseMessage>(
+  FhsProto.NodeAdvertiseMessageSchema,
+  (message) => nodeAdvertiseSignaturePayload(message.did, beaconHash(message.beacon), Number(message.timestamp), message.ttlSeconds),
+  (message) => message.did
+);
+export const missionOfferCodec = signedCodec<FhsProto.MissionOfferMessage>(
+  FhsProto.MissionOfferMessageSchema,
+  (message) => missionOfferSignaturePayload(message.missionId, message.navigatorDid, message.missionType, Number(message.bidDeadlineMs), Number(message.timestamp)),
+  (message) => message.navigatorDid
+);
+export const missionBidCodec = signedCodec<FhsProto.MissionBidMessage>(
+  FhsProto.MissionBidMessageSchema,
+  (message) => missionBidSignaturePayload(message.missionId, message.providerDid, message.offeredCapabilities, Number(message.timestamp)),
+  (message) => message.providerDid
+);
+export const missionAssignCodec = signedCodec<FhsProto.MissionAssignMessage>(
+  FhsProto.MissionAssignMessageSchema,
+  (message) => missionAssignSignaturePayload(message.missionId, message.navigatorDid, message.assignedProvider, Number(message.timestamp)),
+  (message) => message.navigatorDid
+);
+export const dhtBeaconCodec = signedCodec<FhsProto.DhtBeaconRecord>(
+  FhsProto.DhtBeaconRecordSchema,
+  (message) => dhtBeaconSignaturePayload(message.did, beaconHash(message.beacon), Number(message.publishedAt), Number(message.expiresAt)),
+  (message) => message.did
+);
 
 export function dynamicValueToUnknown(value: FhsProto.DynamicValue | undefined): unknown {
   if (!value?.kind.case) return undefined;
