@@ -2,8 +2,33 @@ import type { AgentEvent, ProvenanceInfo } from "./agent-events.js";
 export type { KbCitation, UserMessage } from "@rafex/galaxia-fhs-protocol/types";
 
 export type ChatMessage =
-  | { role: "user"; content: string; attachmentName?: string; attachmentIsPdf?: boolean }
-  | { role: "assistant"; content: string; provenance?: ProvenanceInfo };
+  | {
+      id: string;
+      role: "user";
+      content: string;
+      createdAt: number;
+      completedAt?: number;
+      durationMs?: number;
+      attachmentName?: string;
+      attachmentIsPdf?: boolean;
+    }
+  | {
+      id: string;
+      role: "assistant";
+      content: string;
+      createdAt: number;
+      completedAt?: number;
+      durationMs?: number;
+      provenance?: ProvenanceInfo;
+    };
+
+export interface ChatConversation {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: ChatMessage[];
+}
 
 export interface ChatState {
   messages: ChatMessage[];

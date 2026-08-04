@@ -1,5 +1,16 @@
-import type { AgentEvent, ChatMessage, ChatState, KbCitation, ProvenanceInfo } from "../types/fhs.js";
+import type { AgentEvent, ChatConversation, ChatMessage, ChatState, KbCitation, ProvenanceInfo } from "../types/fhs.js";
 import { connectToChat, type ChatConnection } from "../services/api.js";
+import {
+  createChatHistory,
+  createConversation,
+  formatDayLabel,
+  formatDuration,
+  formatMessageTime,
+  loadChatHistory,
+  saveChatHistory,
+  upsertConversation,
+  type ChatHistory,
+} from "../services/chat-history.js";
 import { applyTheme, cycleTheme, getCurrentTheme, getInitialTheme, themeLabel } from "../services/theme.js";
 import { createDrawerGroup } from "./drawer.js";
 import { initTooltips, refreshTooltip } from "./tooltip.js";
@@ -20,6 +31,10 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   };
 
   let conversationId: string | null = null;
+  let historyConversationId: string | null = null;
+  let chatHistory: ChatHistory = createChatHistory();
+  let responseStartedAt: number | null = null;
+  let responseMessageId: string | null = null;
   let chatConnection: ChatConnection | null = null;
   let pendingAttachment: string | null = null;
   let pendingAttachmentIsPdf = false;
@@ -47,10 +62,13 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         <button type="button" class="icon-btn tour-trigger" aria-label="Ayuda: repetir el tour guiado" data-tooltip="Repetir el tour guiado">?</button>
       </header>
       <aside class="sidebar drawer-panel" data-drawer="sidebar">
-        <h2 data-tooltip="Historial de conversaciones en este dispositivo">Conversaciones</h2>
-        <ul class="conversation-list">
-          <li class="active">OCR demo</li>
-        </ul>
+        <div class="sidebar-heading">
+          <h2 data-tooltip="Historial de conversaciones en este dispositivo">Conversaciones locales</h2>
+          <button type="button" class="new-conversation-btn" data-tooltip="Crear una conversación nueva">＋</button>
+        </div>
+        <p class="history-local-note">Solo en este navegador</p>
+        <ul class="conversation-list"></ul>
+        <button type="button" class="clear-history-btn">Borrar historial local</button>
       </aside>
       <main class="chat-area">
         <div class="messages"></div>
@@ -140,6 +158,9 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   const attachBtn = container.querySelector(".attach-btn") as HTMLButtonElement;
   const fileInput = container.querySelector(".file-input") as HTMLInputElement;
   const activityLogEl = container.querySelector(".activity-log") as HTMLElement;
+  const conversationListEl = container.querySelector(".conversation-list") as HTMLElement;
+  const newConversationBtn = container.querySelector(".new-conversation-btn") as HTMLButtonElement;
+  const clearHistoryBtn = container.querySelector(".clear-history-btn") as HTMLButtonElement;
   const modelSelector = container.querySelector(".model-selector") as HTMLSelectElement;
   const scopeSelector = container.querySelector(".scope-selector") as HTMLSelectElement;
   const ocrModeSelector = container.querySelector(".ocr-mode-selector") as HTMLSelectElement;
@@ -161,6 +182,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   const themeToggleBtn = container.querySelector(".theme-toggle") as HTMLButtonElement;
   const tourTriggerBtn = container.querySelector(".tour-trigger") as HTMLButtonElement;
 
+  initializeHistory();
   initTooltips(container);
 
   const drawers = createDrawerGroup(scrimEl);
@@ -280,6 +302,18 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   sendBtn.addEventListener("click", () => void submitMessage());
 
+  newConversationBtn.addEventListener("click", () => {
+    if (state.isStreaming) return;
+    startNewConversation();
+  });
+
+  clearHistoryBtn.addEventListener("click", () => {
+    if (!window.confirm("¿Borrar todas las conversaciones guardadas en este navegador?")) return;
+    chatHistory = createChatHistory();
+    saveChatHistory(chatHistory);
+    startNewConversation();
+  });
+
   attachBtn.addEventListener("click", () => fileInput.click());
 
   fileInput.addEventListener("change", () => void (async () => {
@@ -298,6 +332,154 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     attachBtn.classList.add("attached");
   })());
 
+  function initializeHistory() {
+    chatHistory = loadChatHistory();
+    const active = chatHistory.conversations[0];
+    historyConversationId = active?.id ?? null;
+    state.messages = active ? [...active.messages] : [];
+    renderConversationList();
+    renderMessages();
+  }
+
+  function startNewConversation() {
+    chatConnection?.close();
+    chatConnection = null;
+    conversationId = null;
+    historyConversationId = null;
+    responseStartedAt = null;
+    responseMessageId = null;
+    state.messages = [];
+    state.isStreaming = false;
+    hideThinking();
+    activityLogEl.innerHTML = "";
+    provenancePlaceholder.textContent = "Esperando primera respuesta...";
+    renderConversationList();
+    renderMessages();
+    textareaEl.focus();
+  }
+
+  function selectConversation(id: string) {
+    if (state.isStreaming) return;
+    const selected = chatHistory.conversations.find((conversation) => conversation.id === id);
+    if (!selected) return;
+    chatConnection?.close();
+    chatConnection = null;
+    conversationId = null;
+    historyConversationId = selected.id;
+    responseStartedAt = null;
+    responseMessageId = null;
+    state.messages = [...selected.messages];
+    activityLogEl.innerHTML = "";
+    provenancePlaceholder.textContent = "Esperando primera respuesta...";
+    renderConversationList();
+    renderMessages();
+  }
+
+  function ensureHistoryConversation(): ChatConversation {
+    const active = historyConversationId
+      ? chatHistory.conversations.find((conversation) => conversation.id === historyConversationId)
+      : undefined;
+    if (active) return active;
+    const created = createConversation();
+    historyConversationId = created.id;
+    chatHistory = upsertConversation(chatHistory, created);
+    saveChatHistory(chatHistory);
+    return created;
+  }
+
+  function persistActiveConversation() {
+    const active = ensureHistoryConversation();
+    const updated = { ...active, messages: [...state.messages], updatedAt: Date.now() };
+    chatHistory = upsertConversation(chatHistory, updated);
+    saveChatHistory(chatHistory);
+    renderConversationList();
+  }
+
+  function renderConversationList() {
+    conversationListEl.innerHTML = "";
+    for (const conversation of chatHistory.conversations) {
+      const item = document.createElement("li");
+      item.className = conversation.id === historyConversationId ? "active" : "";
+      item.dataset.conversationId = conversation.id;
+      item.tabIndex = 0;
+      item.setAttribute("role", "button");
+      item.setAttribute("aria-label", `Abrir ${conversation.title}`);
+
+      const title = document.createElement("span");
+      title.className = "conversation-title";
+      title.textContent = conversation.title;
+      const time = document.createElement("time");
+      time.className = "conversation-time";
+      time.dateTime = new Date(conversation.updatedAt).toISOString();
+      time.textContent = formatMessageTime(conversation.updatedAt);
+      item.append(title, time);
+
+      item.addEventListener("click", () => selectConversation(conversation.id));
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          selectConversation(conversation.id);
+        }
+      });
+      conversationListEl.appendChild(item);
+    }
+  }
+
+  function renderMessages() {
+    messagesEl.innerHTML = "";
+    let previousDay = "";
+    for (const message of state.messages) {
+      const day = new Date(message.createdAt).toDateString();
+      if (day !== previousDay) {
+        const separator = document.createElement("div");
+        separator.className = "message-day-separator";
+        separator.textContent = formatDayLabel(message.createdAt);
+        messagesEl.appendChild(separator);
+        previousDay = day;
+      }
+      messagesEl.appendChild(renderMessageElement(message));
+    }
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function renderMessageElement(message: ChatMessage): HTMLElement {
+    const div = document.createElement("div");
+    div.className = `message ${message.role}`;
+    div.dataset.messageId = message.id;
+
+    if (message.role === "user" && message.attachmentName) {
+      const badge = document.createElement("div");
+      badge.className = "message-attachment";
+      badge.textContent = `${message.attachmentIsPdf ? "📄" : "📎"} ${message.attachmentName} — cargado`;
+      div.appendChild(badge);
+    }
+
+    const body = document.createElement("div");
+    body.className = "message-body";
+    body.textContent = message.content;
+    div.appendChild(body);
+
+    const meta = document.createElement("div");
+    meta.className = "message-meta";
+    meta.textContent = formatMessageTime(message.createdAt) +
+      (message.role === "assistant" && message.durationMs != null ? ` · ${formatDuration(message.durationMs)}` : "");
+    meta.title = new Date(message.createdAt).toLocaleString();
+    div.appendChild(meta);
+    return div;
+  }
+
+  function refreshMessageElement(message: ChatMessage) {
+    const element = messagesEl.querySelector(`[data-message-id="${message.id}"]`);
+    if (!element) return;
+    const body = element.querySelector(".message-body");
+    if (body) body.textContent = message.content;
+    const meta = element.querySelector(".message-meta");
+    if (meta) {
+      meta.textContent = formatMessageTime(message.createdAt) +
+        (message.role === "assistant" && message.durationMs != null ? ` · ${formatDuration(message.durationMs)}` : "");
+    }
+  }
+
   /** La configuración IPFS es local/build-time; no se consulta por HTTP. */
   function configureIpfsSettings() {
     const gateway = import.meta.env.VITE_FHS_IPFS_GATEWAY_URL as string | undefined;
@@ -315,12 +497,17 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     if ((!text && !pendingAttachment) || state.isStreaming) return;
 
     const userContent = text || (pendingAttachment ? (pendingAttachmentIsPdf ? "[PDF adjunto]" : "[imagen adjunta]") : "");
+    const createdAt = Date.now();
     addMessage({
+      id: crypto.randomUUID(),
       role: "user",
       content: userContent,
+      createdAt,
       attachmentName: pendingAttachment ? pendingAttachmentName || undefined : undefined,
       attachmentIsPdf: pendingAttachmentIsPdf,
     });
+    responseStartedAt = createdAt;
+    responseMessageId = null;
 
     const artifacts = pendingAttachment ? [pendingAttachment] : undefined;
     const attachmentName = pendingAttachmentName;
@@ -392,6 +579,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       case "assistant.completed":
         hideThinking();
         renderProvenance(event.data.provenance);
+        completeAssistantResponse(event.data.provenance);
         state.isStreaming = false;
         sendBtn.disabled = false;
         break;
@@ -416,6 +604,9 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       case "error":
         hideThinking();
         addActivityItem("error", `[${event.data.code}] ${event.data.message}`);
+        persistActiveConversation();
+        responseStartedAt = null;
+        responseMessageId = null;
         state.isStreaming = false;
         sendBtn.disabled = false;
         break;
@@ -424,21 +615,16 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   function addMessage(message: ChatMessage) {
     state.messages.push(message);
-    const div = document.createElement("div");
-    div.className = `message ${message.role}`;
-
-    if (message.role === "user" && message.attachmentName) {
-      const badge = document.createElement("div");
-      badge.className = "message-attachment";
-      badge.textContent = `${message.attachmentIsPdf ? "📄" : "📎"} ${message.attachmentName} — cargado`;
-      div.appendChild(badge);
+    const day = new Date(message.createdAt).toDateString();
+    const previousMessage = state.messages[state.messages.length - 2];
+    if (!previousMessage || new Date(previousMessage.createdAt).toDateString() !== day) {
+      const separator = document.createElement("div");
+      separator.className = "message-day-separator";
+      separator.textContent = formatDayLabel(message.createdAt);
+      messagesEl.appendChild(separator);
     }
-
-    const textEl = document.createElement("div");
-    textEl.textContent = message.content;
-    div.appendChild(textEl);
-
-    messagesEl.appendChild(div);
+    messagesEl.appendChild(renderMessageElement(message));
+    persistActiveConversation();
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
@@ -581,14 +767,39 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   }
 
   function appendAssistantText(text: string) {
-    const last = state.messages[state.messages.length - 1];
-    if (last && last.role === "assistant") {
-      last.content += text;
-      const existing = messagesEl.querySelector(".message.assistant:last-child");
-      if (existing) existing.textContent = last.content;
+    const assistant = responseMessageId
+      ? state.messages.find((message) => message.id === responseMessageId)
+      : undefined;
+    if (assistant?.role === "assistant") {
+      assistant.content += text;
+      refreshMessageElement(assistant);
     } else {
-      addMessage({ role: "assistant", content: text });
+      const assistantMessage: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: text,
+        createdAt: Date.now(),
+      };
+      responseMessageId = assistantMessage.id;
+      addMessage(assistantMessage);
     }
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function completeAssistantResponse(provenance: ProvenanceInfo) {
+    const assistant = responseMessageId
+      ? state.messages.find((message) => message.id === responseMessageId)
+      : [...state.messages].reverse().find((message) => message.role === "assistant");
+    const completedAt = Date.now();
+    if (assistant?.role === "assistant") {
+      assistant.provenance = provenance;
+      assistant.completedAt = completedAt;
+      assistant.durationMs = responseStartedAt == null ? undefined : Math.max(0, completedAt - responseStartedAt);
+      refreshMessageElement(assistant);
+    }
+    persistActiveConversation();
+    responseStartedAt = null;
+    responseMessageId = null;
   }
 
   function addActivityItem(level: "info" | "success" | "warning" | "error", text: string) {

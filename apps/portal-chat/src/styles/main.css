@@ -241,6 +241,44 @@ input {
   margin: 0 0 0.75rem;
 }
 
+.sidebar-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.sidebar-heading h2 {
+  margin-bottom: 0;
+}
+
+.history-local-note {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.new-conversation-btn,
+.clear-history-btn {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.new-conversation-btn {
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.new-conversation-btn:hover,
+.clear-history-btn:hover {
+  background: var(--surface-hover);
+}
+
 .conversation-list {
   list-style: none;
   padding: 0;
@@ -251,15 +289,39 @@ input {
 }
 
 .conversation-list li {
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 0.625rem;
   border-radius: var(--radius);
   cursor: pointer;
   font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .conversation-list li:hover,
 .conversation-list li.active {
   background: var(--surface-hover);
+}
+
+.conversation-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-time {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+.clear-history-btn {
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.45rem 0.625rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
 }
 
 /* ── Chat ─────────────────────────────────────────────────────────────── */
@@ -336,10 +398,28 @@ input {
   40% { transform: scale(1); opacity: 1; }
 }
 
-.message .meta {
+.message-meta {
   margin-top: 0.5rem;
   font-size: 0.75rem;
   color: var(--text-muted);
+  text-align: right;
+}
+
+.message.user .message-meta {
+  color: color-mix(in srgb, var(--accent-ink) 70%, transparent);
+}
+
+.message-day-separator {
+  align-self: center;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.25rem 0.75rem;
+  border: var(--border-width) solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.75rem;
 }
 
 .message-attachment {
