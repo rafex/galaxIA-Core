@@ -21,4 +21,15 @@ describe("FHS protobuf wire adapters", () => {
   it("rechaza null porque DynamicValue no tiene una variante nula en el contrato", () => {
     expect(() => dynamicValueFromUnknown(null)).toThrow(TypeError);
   });
+
+  it("transporta ArtifactRef inline como mensaje Protobuf dedicado", () => {
+    const args = {
+      file: { transport: "inline" as const, base64: "AQID", filename: "scan.png" },
+    };
+    const envelope = makeToolCallEnvelope("did:key:navigator", "mission-2", "document.ocr", args);
+    const decoded = decodeEnvelope(encodeEnvelope(envelope));
+
+    if (decoded.payload.case !== "toolCall") return;
+    expect(dynamicValueToUnknown(decoded.payload.value.toolCalls[0]?.function?.arguments)).toEqual(args);
+  });
 });

@@ -18,6 +18,7 @@ import {
   nodeAdvertiseSignaturePayload,
   newEnvelope,
   type GenerateRequest,
+  type ArtifactRef as LocalArtifactRef,
   type LlmMessage,
   type ToolDefinition as AppToolDefinition,
   type ToolCall as AppToolCall,
@@ -39,6 +40,11 @@ export function dynamicValueFromUnknown(value: unknown): FhsProto.DynamicValue {
   }
   if (value instanceof Uint8Array) {
     return create(FhsProto.DynamicValueSchema, { kind: { case: "bytesValue", value } });
+  }
+  if (isArtifactRef(value)) {
+    return create(FhsProto.DynamicValueSchema, {
+      kind: { case: "artifactRef", value: artifactRefToProto(value) },
+    });
   }
   if (Array.isArray(value)) {
     return create(FhsProto.DynamicValueSchema, {
@@ -199,6 +205,8 @@ export function dynamicValueToUnknown(value: FhsProto.DynamicValue | undefined):
     case "stringValue":
     case "bytesValue":
       return value.kind.value;
+    case "artifactRef":
+      return artifactRefFromProto(value.kind.value);
     case "integerValue":
       return Number(value.kind.value);
     case "listValue":
@@ -208,6 +216,60 @@ export function dynamicValueToUnknown(value: FhsProto.DynamicValue | undefined):
         Object.entries(value.kind.value.fields).map(([key, field]) => [key, dynamicValueToUnknown(field)])
       );
   }
+}
+
+function isArtifactRef(value: unknown): value is LocalArtifactRef {
+  if (!value || typeof value !== "object") return false;
+  const transport = (value as { transport?: unknown }).transport;
+  return transport === "inline" || transport === "ipfs";
+}
+
+function artifactRefToProto(value: LocalArtifactRef): FhsProto.ArtifactRef {
+  if (value.transport === "inline") {
+    return create(FhsProto.ArtifactRefSchema, {
+      transport: {
+        case: "inline",
+        value: create(FhsProto.InlineArtifactSchema, {
+          data: Uint8Array.from(Buffer.from(value.base64, "base64")),
+          filename: value.filename ?? "",
+        }),
+      },
+    });
+  }
+
+  return create(FhsProto.ArtifactRefSchema, {
+    transport: {
+      case: "ipfs",
+      value: create(FhsProto.IpfsArtifactSchema, {
+        cid: value.cid,
+        network: value.network,
+        gatewayUrl: value.gatewayUrl ?? "",
+        filename: value.filename ?? "",
+        retention: value.retention ?? "ephemeral",
+      }),
+    },
+  });
+}
+
+function artifactRefFromProto(value: FhsProto.ArtifactRef): LocalArtifactRef {
+  if (value.transport.case === "inline") {
+    return {
+      transport: "inline",
+      base64: Buffer.from(value.transport.value.data).toString("base64"),
+      filename: value.transport.value.filename || undefined,
+    };
+  }
+  if (value.transport.case === "ipfs") {
+    return {
+      transport: "ipfs",
+      cid: value.transport.value.cid,
+      network: value.transport.value.network as "public" | "private",
+      gatewayUrl: value.transport.value.gatewayUrl || undefined,
+      filename: value.transport.value.filename || undefined,
+      retention: value.transport.value.retention === "reuse" ? "reuse" : "ephemeral",
+    };
+  }
+  throw new Error("ArtifactRef Protobuf sin transporte");
 }
 
 export function toolInputSchemaFromLegacy(
