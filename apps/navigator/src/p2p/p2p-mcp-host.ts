@@ -8,18 +8,13 @@
  * callTool() hace el ciclo completo de misión.
  */
 
-import { randomUUID } from "node:crypto";
 import { multiaddr } from "@multiformats/multiaddr";
 import type { PublishedService } from "@rafex/galaxia-fhs-protocol";
 import { McpHost, type LoadedTool, type DispatchResult, type TraceContext } from "../providers/mcp-host.js";
 import { runMissionCycle } from "./mission-cycle.js";
 import { sendEnvelope, decodeStream } from "./stream-codec.js";
 import type { FhsNode, FhsIdentity, BidCollector, PeerCache } from "./nav-node.js";
-import type {
-  HandshakeAckMessage,
-  ToolP2pCallResultMessage,
-  ToolP2pCallErrorMessage,
-} from "./fhs-p2p-types.js";
+import { dynamicValueToUnknown, makeHandshakeEnvelope, makeToolCallEnvelope } from "./p2p-wire.js";
 import { FHS_STREAM_PROTOCOL } from "./fhs-p2p-types.js";
 
 const BID_DEADLINE_MS = 2_000;
@@ -50,27 +45,20 @@ export class P2pMcpHost extends McpHost {
       if (peers.length === 0) continue;
 
       for (const peer of peers) {
-        // Parsear beacon para obtener tools y capabilities
-        try {
-          const beacon = JSON.parse(peer.beacon) as {
-            tools?: string[];
-            capabilities?: string[];
-          };
-          const toolNames = beacon.tools ?? [];
-          const capabilities = beacon.capabilities ?? [];
-
-          for (const toolName of toolNames) {
-            const capabilityId = capabilities[0] ?? toolName;
-            tools.push({
-              name: toolName,
-              description: `Tool '${toolName}' vía satellite P2P`,
-              inputSchema: undefined,
-              providerId: peer.did,
-              providerName: p.providerName || peer.did,
-              capabilityId,
-            });
-          }
-        } catch { /* beacon inválido */ }
+        const capabilityIds = [
+          ...peer.beacon.capabilities.map((capability) => capability.id),
+          ...peer.beacon.agentCapabilities.map((capability) => capability.id),
+        ];
+        for (const capabilityId of capabilityIds) {
+          tools.push({
+            name: capabilityId,
+            description: `Capability '${capabilityId}' vía satellite P2P`,
+            inputSchema: undefined,
+            providerId: peer.did,
+            providerName: p.providerName || peer.did,
+            capabilityId,
+          });
+        }
       }
     }
 
@@ -134,52 +122,44 @@ export class P2pMcpHost extends McpHost {
           const messages = decodeStream(stream);
 
           // 3. Handshake
-          sendEnvelope(stream, "handshake", {
-            fhsVersion: "0.1",
-            listenAddrs: (this.navNode.getMultiaddrs() as Array<{ toString(): string }>).map((a) => a.toString()),
-            beacon: JSON.stringify({ type: "navigator" }),
-          });
+          sendEnvelope(stream, makeHandshakeEnvelope(
+            this.navIdentity.did,
+            (this.navNode.getMultiaddrs() as Array<{ toString(): string }>).map((a) => a.toString())
+          ));
 
           const ackFrame = await messages.next();
-          if (ackFrame.done || ackFrame.value.type !== "handshake_ack") {
+          if (ackFrame.done || ackFrame.value.payload.case !== "handshakeAck") {
             throw new Error("P2P: respuesta inesperada al handshake del Satellite");
           }
-          void (ackFrame.value.payload as HandshakeAckMessage);
 
           // 4. Tool call con un único tool call
-          const toolCallId = randomUUID();
-          sendEnvelope(stream, "tool_call", {
-            missionId,
-            toolCalls: [
-              {
-                id: toolCallId,
-                type: "function",
-                function: { name: toolName, arguments: JSON.stringify(args) },
-              },
-            ],
-          });
+          sendEnvelope(stream, makeToolCallEnvelope(this.navIdentity.did, missionId, toolName, args));
 
           // 5. Esperar dispatch_ack + tool_result/tool_error
           while (true) {
             const frame = await messages.next();
             if (frame.done) break;
 
-            const { type, payload } = frame.value;
+            const payload = frame.value.payload;
 
-            if (type === "dispatch_ack") {
+            if (payload.case === "dispatchAck") {
               dispatchMs = Date.now() - startedAt;
               continue;
             }
 
-            if (type === "tool_result") {
-              const r = payload as ToolP2pCallResultMessage;
-              resultMessage = { type: "tool.result", missionId: r.missionId, result: r.result };
+            if (payload.case === "toolResult") {
+              const r = payload.value;
+              resultMessage = {
+                type: "tool.result",
+                missionId: r.missionId,
+                toolCallId: r.toolCallId,
+                result: dynamicValueToUnknown(r.result),
+              };
               break;
             }
 
-            if (type === "tool_error") {
-              const e = payload as ToolP2pCallErrorMessage;
-              throw new Error(`P2P tool error: ${e.error}`);
+            if (payload.case === "toolError") {
+              throw new Error(`P2P tool error: ${payload.value.error}`);
             }
           }
 

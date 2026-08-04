@@ -17,11 +17,7 @@ import type { TraceContext } from "../providers/llm-gateway.js";
 import { runMissionCycle } from "./mission-cycle.js";
 import { sendEnvelope, decodeStream } from "./stream-codec.js";
 import type { FhsNode, FhsIdentity, BidCollector } from "./nav-node.js";
-import type {
-  HandshakeAckMessage,
-  ChatP2pDeltaMessage,
-  ChatP2pCompletedMessage,
-} from "./fhs-p2p-types.js";
+import { makeChatRequestEnvelope, makeHandshakeEnvelope, toolCallToLegacy } from "./p2p-wire.js";
 import { FHS_STREAM_PROTOCOL } from "./fhs-p2p-types.js";
 
 const BID_DEADLINE_MS = 2_000;
@@ -87,52 +83,45 @@ export class P2pLlmGateway extends LlmGateway {
           const messages = decodeStream(stream);
 
           // 3. Handshake
-          sendEnvelope(stream, "handshake", {
-            fhsVersion: "0.1",
-            listenAddrs: (this.navNode.getMultiaddrs() as Array<{ toString(): string }>).map((a) => a.toString()),
-            beacon: JSON.stringify({ type: "navigator" }),
-          });
+          sendEnvelope(stream, makeHandshakeEnvelope(
+            this.navIdentity.did,
+            (this.navNode.getMultiaddrs() as Array<{ toString(): string }>).map((a) => a.toString())
+          ));
 
           const ackFrame = await messages.next();
-          if (ackFrame.done || ackFrame.value.type !== "handshake_ack") {
+          if (ackFrame.done || ackFrame.value.payload.case !== "handshakeAck") {
             throw new Error("P2P: respuesta inesperada al handshake del Star");
           }
-          void (ackFrame.value.payload as HandshakeAckMessage);
 
           // 4. Chat request
-          sendEnvelope(stream, "chat_request", {
-            missionId,
-            messages: request.messages,
-            tools: request.tools ?? [],
-            model: request.model,
-          });
+          sendEnvelope(stream, makeChatRequestEnvelope(this.navIdentity.did, missionId, request));
 
           // 5. Recolectar deltas y completed
           while (true) {
             const frame = await messages.next();
             if (frame.done) break;
 
-            const { type, payload } = frame.value;
+            const payload = frame.value.payload;
 
-            if (type === "dispatch_ack") {
+            if (payload.case === "dispatchAck") {
               dispatchMs = Date.now() - startedAt;
               continue;
             }
 
-            if (type === "chat_delta") {
-              fullContent += (payload as ChatP2pDeltaMessage).delta;
+            if (payload.case === "chatDelta") {
+              fullContent += payload.value.delta;
               continue;
             }
 
-            if (type === "chat_completed") {
-              const completed = payload as ChatP2pCompletedMessage;
+            if (payload.case === "chatCompleted") {
+              const completed = payload.value;
               if (!fullContent) fullContent = completed.content;
-              toolCalls = (completed.toolCalls ?? []) as GenerateResponse["toolCalls"];
+              toolCalls = completed.toolCalls.map(toolCallToLegacy);
               break;
             }
 
-            if (type === "chat_error") {
-              throw new Error(`P2P Star error: ${JSON.stringify(payload)}`);
+            if (payload.case === "chatError") {
+              throw new Error(`P2P Star error: ${payload.value.error}`);
             }
           }
 
@@ -167,10 +156,10 @@ const P2P_MODEL: ModelInfo = {
   toolCalling: { supported: true },
 } as unknown as ModelInfo;
 
-/** Construye un PublishedService sintético para P2P (sin URL WS real). */
+/** Construye un PublishedService sintético para el selector interno P2P. */
 export function p2pLlmService(): PublishedService {
   return {
-    endpoint: { url: "p2p://navigator" },
+    endpoint: { url: "p2p://navigator", protocol: "fhs" },
     capabilities: [{ id: "chat", type: "llm" }],
     models: [P2P_MODEL],
   } as unknown as PublishedService;

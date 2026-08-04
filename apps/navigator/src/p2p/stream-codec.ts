@@ -1,25 +1,19 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call */
 /**
- * Codificador/decodificador de envelopes FHS sobre framing LPP (it-length-prefixed).
- * Cada mensaje es un JSON { type, payload } prefijado por su longitud varint.
+ * Codificador/decodificador de envelopes FHS sobre framing LPP.
+ * El payload completo es el Envelope protobuf generado por el SDK.
  */
 
 import * as lp from "it-length-prefixed";
-import { fromString, toString } from "uint8arrays";
+import { decodeEnvelope, encodeEnvelopeFrame } from "@rafex/galaxia-fhs-protocol";
+import type { FhsProto } from "@rafex/galaxia-fhs-protocol";
 import type { FhsNode } from "./nav-node.js";
 
-export interface FhsEnvelope {
-  type: string;
-  payload: unknown;
-}
+export type FhsEnvelope = FhsProto.Envelope;
 
-export function sendEnvelope(stream: FhsNode, type: string, payload: unknown): void {
-  const bytes = fromString(JSON.stringify({ type, payload }), "utf8");
-  // lp.encode es síncrono — for...of, no for await
-  for (const chunk of lp.encode([bytes])) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-    stream.send(chunk);
-  }
+export function sendEnvelope(stream: FhsNode, envelope: FhsEnvelope): void {
+  // encodeEnvelopeFrame ya aplica el mismo LPP que consume lp.decode.
+  stream.send(encodeEnvelopeFrame(envelope));
 }
 
 export async function* decodeStream(stream: FhsNode): AsyncGenerator<FhsEnvelope> {
@@ -28,7 +22,7 @@ export async function* decodeStream(stream: FhsNode): AsyncGenerator<FhsEnvelope
   for await (const chunk of decoded) {
     const data = chunk.slice();
     try {
-      yield JSON.parse(toString(data, "utf8")) as FhsEnvelope;
+      yield decodeEnvelope(data);
     } catch {
       // ignorar frames malformados
     }

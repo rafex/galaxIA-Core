@@ -10,12 +10,12 @@
  */
 
 import type { PublishedService } from "@rafex/galaxia-fhs-protocol";
-import type { ResolvedProvider } from "../atlas-client.js";
+import type { AtlasClient, ResolvedProvider } from "../atlas-client.js";
 import type { PeerCache, PeerEntry } from "./nav-node.js";
 
 function peerToProvider(peer: PeerEntry, type: "llm" | "mcp"): ResolvedProvider {
   const service: PublishedService = {
-    endpoint: { url: `p2p://${peer.did}` },
+    endpoint: { url: `p2p://${peer.did}`, protocol: "fhs" },
     capabilities: peer.capabilities.map((id) => ({ id, type })),
     models:
       type === "llm"
@@ -40,7 +40,7 @@ function peerToProvider(peer: PeerEntry, type: "llm" | "mcp"): ResolvedProvider 
   };
 }
 
-export class P2pAtlasClient {
+export class P2pAtlasClient implements AtlasClient {
   constructor(private readonly peerCache: PeerCache) {}
 
   async getProviders(type?: "llm" | "mcp"): Promise<ResolvedProvider[]> {

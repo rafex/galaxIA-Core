@@ -22,8 +22,11 @@ import { multiaddr } from "@multiformats/multiaddr";
 import { base58btc } from "multiformats/bases/base58";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fromString, toString } from "uint8arrays";
+import type { FhsProto } from "@rafex/galaxia-fhs-protocol";
+import { type ProtoCodec } from "./p2p-wire.js";
+import { FhsProto as Wire } from "@rafex/galaxia-fhs-protocol";
 
-import type { NodeAdvertiseMessage, MissionBidMessage } from "./fhs-p2p-types.js";
+type MissionBidMessage = FhsProto.MissionBidMessage;
 
 // ── Alias de tipo ──────────────────────────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,7 +42,7 @@ export interface FhsIdentity {
 
 export interface PeerEntry {
   did: string;
-  beacon: string;
+  beacon: FhsProto.Beacon;
   multiaddrs: string[];
   trustLevel: string;
   reputationScore: number;
@@ -51,18 +54,24 @@ export interface PeerEntry {
 export class PeerCache {
   private peers = new Map<string, PeerEntry>();
 
-  upsert(msg: NodeAdvertiseMessage): void {
-    let capabilities: string[] = [];
-    let peerType = "unknown";
-    try {
-      const b = JSON.parse(msg.beacon) as { type?: string; capabilities?: string[] };
-      peerType = b.type ?? "unknown";
-      capabilities = b.capabilities ?? [];
-    } catch { /* ignorar */ }
+  upsert(msg: FhsProto.NodeAdvertiseMessage): void {
+    const beacon = msg.beacon;
+    if (!beacon) return;
+    const capabilities = [
+      ...beacon.capabilities.map((capability) => capability.id),
+      ...beacon.agentCapabilities.map((capability) => capability.id),
+    ];
+    const peerType = beacon.provider?.type === Wire.ProviderType.STAR
+      ? "star"
+      : beacon.provider?.type === Wire.ProviderType.SATELLITE
+        ? "satellite"
+        : beacon.provider?.type === Wire.ProviderType.NOVA
+          ? "nova"
+          : "unknown";
 
     this.peers.set(msg.did, {
       did: msg.did,
-      beacon: msg.beacon,
+      beacon,
       multiaddrs: msg.multiaddrs,
       trustLevel: msg.trustLevel,
       reputationScore: 0.5,
@@ -212,17 +221,18 @@ export async function createNavNode(config: NavNodeConfig): Promise<FhsNode> {
 
 // ── PubSub helpers ─────────────────────────────────────────────────────────────
 
-export function pubsubPublish(node: FhsNode, topic: string, msg: unknown): void {
-  const bytes = fromString(JSON.stringify(msg), "utf8");
+export function pubsubPublish<T>(node: FhsNode, topic: string, msg: T, codec: ProtoCodec<T>): void {
+  const bytes = codec.encode(msg);
   (node.services.pubsub.publish(topic, bytes) as Promise<unknown>).catch((e: unknown) => {
     console.error(`[nav-pubsub] error en ${topic}:`, e);
   });
 }
 
-export function pubsubSubscribe(
+export function pubsubSubscribe<T>(
   node: FhsNode,
   topic: string,
-  handler: (msg: unknown) => void
+  handler: (msg: T) => void,
+  codec: ProtoCodec<T>
 ): void {
   node.services.pubsub.subscribe(topic);
   node.services.pubsub.addEventListener(
@@ -230,7 +240,7 @@ export function pubsubSubscribe(
     (evt: { detail: { topic: string; data: Uint8Array } }) => {
       if (evt.detail.topic !== topic) return;
       try {
-        handler(JSON.parse(toString(evt.detail.data, "utf8")) as unknown);
+        handler(codec.decode(evt.detail.data));
       } catch { /* ignorar */ }
     }
   );
@@ -238,9 +248,9 @@ export function pubsubSubscribe(
 
 // ── DHT helper ────────────────────────────────────────────────────────────────
 
-export async function dhtPut(node: FhsNode, key: string, value: unknown): Promise<void> {
+export async function dhtPut<T>(node: FhsNode, key: string, value: T, codec: ProtoCodec<T>): Promise<void> {
   const keyBytes = fromString(key, "utf8");
-  const valueBytes = fromString(JSON.stringify(value), "utf8");
+  const valueBytes = codec.encode(value);
   const signal = AbortSignal.timeout(5_000);
   for await (const _ of node.services.dht.put(keyBytes, valueBytes, { signal })) {
     void _;

@@ -6,16 +6,16 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { create } from "@bufbuild/protobuf";
+import { FhsProto } from "@rafex/galaxia-fhs-protocol";
 import {
   TOPIC_MISSIONS_OFFER,
   TOPIC_MISSIONS_ASSIGN,
-  type MissionOfferMessage,
-  type MissionBidMessage,
-  type MissionAssignMessage,
   type MissionType,
 } from "./fhs-p2p-types.js";
 import type { FhsNode, FhsIdentity, BidCollector } from "./nav-node.js";
 import { pubsubPublish } from "./nav-node.js";
+import { missionAssignCodec, missionOfferCodec } from "./p2p-wire.js";
 
 export interface MissionCycleOptions {
   node: FhsNode;
@@ -29,7 +29,7 @@ export interface MissionCycleOptions {
 
 export interface WinningBid {
   missionId: string;
-  bid: MissionBidMessage;
+  bid: FhsProto.MissionBidMessage;
 }
 
 /**
@@ -55,18 +55,18 @@ export async function runMissionCycle(
     (node.getMultiaddrs() as Array<{ toString(): string }>).map((a) => a.toString());
 
   // Publicar offer
-  const offer: MissionOfferMessage = {
+  const offer = create(FhsProto.MissionOfferMessageSchema, {
     missionId,
     navigatorDid: identity.did,
     navigatorMultiaddrs: multiaddrs(),
     missionType,
     requiredCapabilities,
-    preferredModel,
-    bidDeadlineMs,
-    timestamp: Date.now(),
+    preferredModel: preferredModel ?? "",
+    bidDeadlineMs: BigInt(bidDeadlineMs),
+    timestamp: BigInt(Date.now()),
     signature: new Uint8Array(0),
-  };
-  pubsubPublish(node, TOPIC_MISSIONS_OFFER, offer);
+  });
+  pubsubPublish(node, TOPIC_MISSIONS_OFFER, offer, missionOfferCodec);
   console.log(`[mission] offer ${missionId} publicado (type=${missionType})`);
 
   // Esperar bids por bidDeadlineMs
@@ -92,14 +92,14 @@ export async function runMissionCycle(
   })[0];
 
   // Publicar assign
-  const assign: MissionAssignMessage = {
+  const assign = create(FhsProto.MissionAssignMessageSchema, {
     missionId,
     navigatorDid: identity.did,
     assignedProvider: best.providerDid,
-    timestamp: Date.now(),
+    timestamp: BigInt(Date.now()),
     signature: new Uint8Array(0),
-  };
-  pubsubPublish(node, TOPIC_MISSIONS_ASSIGN, assign);
+  });
+  pubsubPublish(node, TOPIC_MISSIONS_ASSIGN, assign, missionAssignCodec);
   console.log(
     `[mission] assign ${missionId} → ${best.providerDid} (${best.providerMultiaddrs[0] ?? "?"})`
   );
