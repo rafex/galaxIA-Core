@@ -22,7 +22,8 @@ RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
       > apps/portal-chat/public/version.json
 
 ENV VITE_FHS_NAVIGATOR_MULTIADDR=$VITE_FHS_NAVIGATOR_MULTIADDR
-RUN npm run build -w apps/portal-chat
+RUN COMMIT_HASH="$COMMIT_HASH" BUILD_DATE="$BUILD_DATE" \
+    npm run build -w apps/portal-chat
 
 FROM docker.io/library/nginx:alpine
 RUN apk add --no-cache openssl

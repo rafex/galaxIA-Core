@@ -29,7 +29,8 @@ COPY apps/navigator ./apps/navigator
 RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
       > apps/navigator/src/version.json
 
-RUN npm run build -w packages/fhs-node && \
+RUN COMMIT_HASH="$COMMIT_HASH" BUILD_DATE="$BUILD_DATE" \
+    npm run build -w packages/fhs-node && \
     npm run build -w apps/navigator
 
 # Imagen final mínima

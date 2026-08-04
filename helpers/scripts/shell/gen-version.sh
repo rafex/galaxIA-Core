@@ -6,8 +6,21 @@ set -eu
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 
-COMMIT=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-DATE=$(git -C "$ROOT" log -1 --format=%ci 2>/dev/null || date -u "+%Y-%m-%dT%H:%M:%SZ")
+# Container builds do not include .git. In that case the Containerfile passes
+# the deployment commit/date as build arguments and npm's build hook invokes
+# this script again. Prefer those explicit values so the hook cannot replace
+# the deployment metadata with "unknown".
+if [ -n "${COMMIT_HASH:-}" ]; then
+  COMMIT="$COMMIT_HASH"
+else
+  COMMIT=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+fi
+
+if [ -n "${BUILD_DATE:-}" ]; then
+  DATE="$BUILD_DATE"
+else
+  DATE=$(git -C "$ROOT" log -1 --format=%ci 2>/dev/null || date -u "+%Y-%m-%dT%H:%M:%SZ")
+fi
 JSON=$(printf '{"commit":"%s","date":"%s"}\n' "$COMMIT" "$DATE")
 
 echo "$JSON" > "$ROOT/apps/atlas/src/version.json"

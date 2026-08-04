@@ -11,6 +11,13 @@ server {
     ssl_certificate_key /etc/nginx/certs/portal.key;
     ssl_protocols TLSv1.2 TLSv1.3;
 
+    # La versión identifica exactamente la imagen desplegada. No debe quedar
+    # atrapada en la caché del navegador después de actualizar el contenedor.
+    location = /version.json {
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        try_files $uri =404;
+    }
+
     location / {
         try_files $uri $uri/ /index.html;
     }
