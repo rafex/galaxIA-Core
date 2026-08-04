@@ -39,7 +39,6 @@
     "it-length-prefixed": "11.0.1",
     "libp2p": "3.3.8",
     "multiformats": "^13.3.1",
-    "nats": "2.29.3",
     "uint8arrays": "6.1.1"
   },
   "devDependencies": {
