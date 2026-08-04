@@ -27,9 +27,9 @@ import {
   signPayload,
   helloSignaturePayload,
   registerSignaturePayload,
-  type AgentSSEEvent,
   type NodeIdentity,
 } from "@rafex/galaxia-fhs-protocol";
+import type { AgentEvent } from "../apps/navigator/src/agent/events.js";
 
 /** Envoltorio mínimo de mensajes crudos del protocolo FHS (Atlas/tool WS) — este script mockea el wire format directamente, sin pasar por los tipos completos del SDK. */
 interface RawFhsMessage {
@@ -441,12 +441,12 @@ class MockLlmProvider {
 // ─── Cliente de chat ──────────────────────────────────────────────
 interface ChatResult {
   providerName: string;
-  events: AgentSSEEvent[];
+  events: AgentEvent[];
 }
 
 function sendChat(fileDataUrl: string, marker: string): Promise<ChatResult> {
   return new Promise((resolve, reject) => {
-    const events: AgentSSEEvent[] = [];
+    const events: AgentEvent[] = [];
     let providerName = "desconocido";
     let conversationId: string | null = null;
     let ocrConfirmed = false;
@@ -475,7 +475,7 @@ function sendChat(fileDataUrl: string, marker: string): Promise<ChatResult> {
     });
 
     ws.on("message", (data: Buffer) => {
-      const event = JSON.parse(data.toString()) as AgentSSEEvent;
+      const event = JSON.parse(data.toString()) as AgentEvent;
       events.push(event);
 
       switch (event.type) {

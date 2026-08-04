@@ -1,4 +1,4 @@
-import type { AgentSSEEvent, ProvenanceInfo } from "@rafex/galaxia-fhs-protocol";
+import type { AgentEvent, ProvenanceInfo } from "./agent-events.js";
 
 export * from "@rafex/galaxia-fhs-protocol";
 
@@ -22,4 +22,4 @@ export interface ChatState {
   ipfsRetention: "ephemeral" | "reuse";
 }
 
-export type { AgentSSEEvent };
+export type { AgentEvent, ProvenanceInfo };

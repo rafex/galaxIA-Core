@@ -13,7 +13,7 @@
  */
 
 import { connect, type NatsConnection, type Subscription } from "nats";
-import type { AgentSSEEvent } from "@rafex/galaxia-fhs-protocol";
+import type { AgentEvent } from "./agent/events.js";
 import type { EventBus } from "./sse/event-bus.js";
 
 const BRIDGED_SUBJECTS = ["fhs.node.online", "fhs.node.lost"];
@@ -51,7 +51,7 @@ export async function connectNatsBridge(
     void (async () => {
       for await (const msg of sub) {
         try {
-          const event = JSON.parse(msg.string()) as AgentSSEEvent;
+          const event = JSON.parse(msg.string()) as AgentEvent;
           eventBus.emit(event);
         } catch {
           log.warn(`Mensaje NATS no parseable en ${subject}`);

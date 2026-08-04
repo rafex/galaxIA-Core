@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { EventBus } from "../sse/event-bus.js";
-import type { AgentSSEEvent } from "@rafex/galaxia-fhs-protocol";
+import type { AgentEvent } from "../agent/events.js";
 
 export function setupEventsApi(app: FastifyInstance, eventBus: EventBus) {
   app.get("/api/chat/:id/events", async (req, reply) => {
@@ -16,7 +16,7 @@ export function setupEventsApi(app: FastifyInstance, eventBus: EventBus) {
 
     const unsubscribe = eventBus.subscribe({
       id: clientId,
-      send: (event: AgentSSEEvent) => {
+      send: (event: AgentEvent) => {
         try {
           reply.raw.write(`event: ${event.type}\n`);
           reply.raw.write(`data: ${JSON.stringify(event.data)}\n\n`);

@@ -1,4 +1,4 @@
-import type { AgentSSEEvent, ChatMessage, ChatState, KbCitation, ProvenanceInfo } from "../types/fhs.js";
+import type { AgentEvent, ChatMessage, ChatState, KbCitation, ProvenanceInfo } from "../types/fhs.js";
 import { connectToChat, type ChatConnection } from "../services/api.js";
 import { applyTheme, cycleTheme, getCurrentTheme, getInitialTheme, themeLabel } from "../services/theme.js";
 import { createDrawerGroup } from "./drawer.js";
@@ -431,7 +431,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     }
   }
 
-  function handleEvent(event: AgentSSEEvent) {
+  function handleEvent(event: AgentEvent) {
     switch (event.type) {
       case "session":
         conversationId = event.data.conversationId;

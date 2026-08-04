@@ -1,5 +1,4 @@
 import {
-  type AgentSSEEvent,
   type ArtifactRef,
   type Signal,
   type GenerateRequest,
@@ -8,18 +7,18 @@ import {
   type LlmMessage,
   type ModelInfo,
   type PrivacyScope,
-  type ProvenanceInfo,
   type PublishedService,
   type ToolCall,
   type ToolDefinition,
   type UserMessage,
 } from "@rafex/galaxia-fhs-protocol";
+import type { AgentEvent, ProvenanceInfo } from "./events.js";
 
 /**
  * Todo evento conversation-scoped se construye sin `conversationId` — `emit()`
  * lo adjunta siempre (ver DEC-0018) — así ningún call site puede olvidarlo.
  */
-type AgentEventInput = AgentSSEEvent extends infer E
+type AgentEventInput = AgentEvent extends infer E
   ? E extends { data: infer D }
     ? Omit<E, "data"> & { data: Omit<D, "conversationId"> }
     : never
@@ -989,7 +988,7 @@ export class AgentRuntime {
     this.eventBus.emit({
       ...event,
       data: { ...event.data, conversationId: this.conversationId },
-    } as AgentSSEEvent);
+    } as AgentEvent);
   }
 
   private emitStatus(status: string, message: string) {

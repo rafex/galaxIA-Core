@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { WebSocket } from "@fastify/websocket";
 import { randomUUID } from "node:crypto";
-import type { AgentSSEEvent, UserMessage } from "@rafex/galaxia-fhs-protocol";
+import type { UserMessage } from "@rafex/galaxia-fhs-protocol";
+import type { AgentEvent } from "../agent/events.js";
 import { AtlasClient } from "../atlas-client.js";
 import { EventBus } from "../sse/event-bus.js";
 import { AgentRuntime, type ModelPreferences } from "../agent/runtime.js";
@@ -56,7 +57,7 @@ export function setupChatWebSocket(
     // de persona. Undefined si el portal no lo envía (backward compat).
     let deviceId: string | undefined;
 
-    const send = (event: AgentSSEEvent) => {
+    const send = (event: AgentEvent) => {
       if (socket.readyState === 1) {
         socket.send(JSON.stringify(event));
       }
@@ -64,7 +65,7 @@ export function setupChatWebSocket(
 
     const unsubscribe = eventBus.subscribe({
       id: `ws-chat-${Date.now()}`,
-      send: (event: AgentSSEEvent) => {
+      send: (event: AgentEvent) => {
         // Eventos con conversationId solo se reenvían al socket dueño de esa
         // conversación — ver DEC-0018. (node.online/node.lost viven en el
         // EventBus interno de Atlas, un proceso aparte desde DEC-0035 — no

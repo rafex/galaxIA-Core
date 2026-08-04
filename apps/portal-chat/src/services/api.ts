@@ -1,4 +1,4 @@
-import type { AgentSSEEvent, UserMessage } from "../types/fhs.js";
+import type { AgentEvent, UserMessage } from "../types/fhs.js";
 import { getOrCreateDeviceId } from "./device-id.js";
 
 export interface ApiOptions {
@@ -40,7 +40,7 @@ const WS_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${location.ho
  * un redeploy del Portal se quedó sin respuesta, sin ningún error en UI).
  */
 export function connectToChat(
-  onEvent: (event: AgentSSEEvent) => void,
+  onEvent: (event: AgentEvent) => void,
   onOpen?: () => void
 ): ChatConnection {
   let socket: WebSocket;
@@ -63,7 +63,7 @@ export function connectToChat(
 
     socket.addEventListener("message", (event: MessageEvent<string>) => {
       try {
-        const payload = JSON.parse(event.data) as AgentSSEEvent;
+        const payload = JSON.parse(event.data) as AgentEvent;
         onEvent(payload);
       } catch (err) {
         console.error("Failed to parse WebSocket event", err);

@@ -1,13 +1,13 @@
-import type { AgentSSEEvent } from "@rafex/galaxia-fhs-protocol";
+import type { AgentEvent } from "../agent/events.js";
 
 export interface SSEClient {
   id: string;
-  send(event: AgentSSEEvent): void;
+  send(event: AgentEvent): void;
 }
 
 export class EventBus {
   private clients = new Map<string, SSEClient>();
-  private runtimes: Array<(event: AgentSSEEvent) => void> = [];
+  private runtimes: Array<(event: AgentEvent) => void> = [];
 
   subscribe(client: SSEClient): () => void {
     this.clients.set(client.id, client);
@@ -16,7 +16,7 @@ export class EventBus {
     };
   }
 
-  subscribeToRuntime(handler: (event: AgentSSEEvent) => void): () => void {
+  subscribeToRuntime(handler: (event: AgentEvent) => void): () => void {
     this.runtimes.push(handler);
     return () => {
       const idx = this.runtimes.indexOf(handler);
@@ -24,7 +24,7 @@ export class EventBus {
     };
   }
 
-  emit(event: AgentSSEEvent) {
+  emit(event: AgentEvent) {
     for (const client of this.clients.values()) {
       client.send(event);
     }
@@ -33,7 +33,7 @@ export class EventBus {
     }
   }
 
-  broadcastToRuntimes(event: AgentSSEEvent) {
+  broadcastToRuntimes(event: AgentEvent) {
     for (const handler of this.runtimes) {
       handler(event);
     }

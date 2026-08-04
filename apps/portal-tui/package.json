@@ -13,7 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@rafex/galaxia-fhs-protocol": "npm:@rafex_labs/galaxia-fhs-protocol@^0.1.29"
+    "@rafex/galaxia-fhs-protocol": "npm:@rafex_labs/galaxia-fhs-protocol@^0.1.30"
   },
   "devDependencies": {
     "@types/node": "20.19.43",
