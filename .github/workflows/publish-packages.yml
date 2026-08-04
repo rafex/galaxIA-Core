@@ -61,6 +61,9 @@ concurrency:
 
 jobs:
   publish:
+    # Los commits automáticos de bump ya se publicaron en el job que los creó;
+    # no deben volver a activar otro bump en cascada.
+    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -114,7 +117,8 @@ jobs:
               CHANGED_FILES=$(git diff --name-only "$BEFORE" "${{ github.sha }}")
               TO_PROCESS=""
               for pkg in $ALL; do
-                if echo "$CHANGED_FILES" | grep -q "^$pkg/"; then
+                PACKAGE_FILES=$(printf '%s\n' "$CHANGED_FILES" | grep "^$pkg/" | grep -v '/version\.json$' || true)
+                if [ -n "$PACKAGE_FILES" ]; then
                   TO_PROCESS="$TO_PROCESS $pkg"
                 fi
               done
