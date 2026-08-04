@@ -102,8 +102,27 @@ function envelopePayloadBytes(payload: FhsProto.Envelope["payload"]): Uint8Array
     toolError: FhsProto.ToolCallErrorMessageSchema,
     toolList: FhsProto.ToolListRequestMessageSchema,
     toolListResp: FhsProto.ToolListResponseMessageSchema,
+    nodeAdvertise: FhsProto.NodeAdvertiseMessageSchema,
+    missionOffer: FhsProto.MissionOfferMessageSchema,
+    missionBid: FhsProto.MissionBidMessageSchema,
+    missionAssign: FhsProto.MissionAssignMessageSchema,
+    dhtBeacon: FhsProto.DhtBeaconRecordSchema,
+    dhtReputation: FhsProto.DhtReputationRecordSchema,
+    missionFeedback: FhsProto.MissionFeedbackMessageSchema,
+    reputationUpdate: FhsProto.ReputationUpdateMessageSchema,
+    agentStart: FhsProto.AgentStartMessageSchema,
+    agentStatus: FhsProto.AgentStatusMessageSchema,
+    starSelected: FhsProto.StarSelectedMessageSchema,
+    toolSelected: FhsProto.ToolSelectedMessageSchema,
+    assistantDelta: FhsProto.AssistantDeltaMessageSchema,
+    assistantCompleted: FhsProto.AssistantCompletedMessageSchema,
+    ocrExtracted: FhsProto.OcrExtractedMessageSchema,
+    kbRecommended: FhsProto.KbRecommendedMessageSchema,
+    attachmentDecision: FhsProto.AttachmentDecisionMessageSchema,
+    kbDecision: FhsProto.KbDecisionMessageSchema,
   } as const;
-  const schema = schemas[payload.case as keyof typeof schemas];
+  const schema = schemas[payload.case];
+  if (!schema) throw new TypeError(`FHS payload sin schema protobuf: ${payload.case}`);
   return encodeMessage(schema, payload.value as never);
 }
 

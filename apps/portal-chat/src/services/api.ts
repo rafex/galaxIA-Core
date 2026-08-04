@@ -312,9 +312,31 @@ function encodePayload(payload: FhsProto.Envelope["payload"]): Uint8Array {
     attachmentDecision: FhsProto.AttachmentDecisionMessageSchema,
     kbDecision: FhsProto.KbDecisionMessageSchema,
     error: FhsProto.ErrorMessageSchema,
+    ping: FhsProto.PingMessageSchema,
+    pong: FhsProto.PongMessageSchema,
+    chatDelta: FhsProto.ChatDeltaMessageSchema,
+    chatCompleted: FhsProto.ChatCompletedMessageSchema,
+    chatError: FhsProto.ChatErrorMessageSchema,
+    dispatchAck: FhsProto.DispatchAckMessageSchema,
+    toolCall: FhsProto.ToolCallRequestMessageSchema,
+    toolCancel: FhsProto.ToolCancelMessageSchema,
+    toolResult: FhsProto.ToolCallResultMessageSchema,
+    toolError: FhsProto.ToolCallErrorMessageSchema,
+    toolList: FhsProto.ToolListRequestMessageSchema,
+    toolListResp: FhsProto.ToolListResponseMessageSchema,
+    nodeAdvertise: FhsProto.NodeAdvertiseMessageSchema,
+    missionOffer: FhsProto.MissionOfferMessageSchema,
+    missionBid: FhsProto.MissionBidMessageSchema,
+    missionAssign: FhsProto.MissionAssignMessageSchema,
+    dhtBeacon: FhsProto.DhtBeaconRecordSchema,
+    dhtReputation: FhsProto.DhtReputationRecordSchema,
+    missionFeedback: FhsProto.MissionFeedbackMessageSchema,
+    reputationUpdate: FhsProto.ReputationUpdateMessageSchema,
   } as const;
   if (!payload.case) return new Uint8Array();
-  return encodeMessage(schemas[payload.case as keyof typeof schemas], payload.value as never);
+  const schema = schemas[payload.case];
+  if (!schema) throw new TypeError(`FHS payload sin schema protobuf: ${payload.case}`);
+  return encodeMessage(schema, payload.value as never);
 }
 
 async function verifyEnvelope(envelope: FhsProto.Envelope, _ownPublicKey: Uint8Array): Promise<boolean> {
