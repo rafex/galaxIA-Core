@@ -30,6 +30,7 @@ import {
 export interface P2pConfig {
   identityKeyPath: string;
   listenAddrs: string[];
+  announceAddrs?: string[];
   bootstrapAddrs: string[];
 }
 
@@ -48,6 +49,7 @@ export async function initP2pProviders(config: P2pConfig): Promise<P2pProviders>
   const node = await createNavNode({
     identity,
     listenAddrs: config.listenAddrs,
+    announceAddrs: config.announceAddrs,
     bootstrapAddrs: config.bootstrapAddrs,
   });
 

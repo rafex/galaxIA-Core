@@ -30,6 +30,9 @@ const FHS_BOOTSTRAP_ADDRS = process.env.FHS_BOOTSTRAP_ADDRS
 const FHS_LISTEN_ADDRS = process.env.FHS_LISTEN_ADDRS
   ? process.env.FHS_LISTEN_ADDRS.split(",").map((a) => a.trim())
   : ["/ip4/0.0.0.0/tcp/4010/ws"];
+const FHS_ANNOUNCE_ADDRS = process.env.FHS_ANNOUNCE_ADDRS
+  ? process.env.FHS_ANNOUNCE_ADDRS.split(",").map((a) => a.trim())
+  : undefined;
 const IDENTITY_KEY_PATH = process.env.IDENTITY_KEY_PATH ?? "./.fhs-identity-navigator.json";
 
 async function main() {
@@ -59,6 +62,7 @@ async function main() {
     p2pProviders = await initP2pProviders({
       identityKeyPath: IDENTITY_KEY_PATH,
       listenAddrs: FHS_LISTEN_ADDRS,
+      announceAddrs: FHS_ANNOUNCE_ADDRS,
       bootstrapAddrs: FHS_BOOTSTRAP_ADDRS,
     });
   }

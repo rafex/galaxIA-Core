@@ -163,6 +163,7 @@ export async function loadOrCreateFhsIdentity(keyPath: string): Promise<FhsIdent
 export interface NavNodeConfig {
   identity: FhsIdentity;
   listenAddrs?: string[];
+  announceAddrs?: string[];
   bootstrapAddrs?: string[];
 }
 
@@ -170,14 +171,20 @@ export async function createNavNode(config: NavNodeConfig): Promise<FhsNode> {
   const {
     identity,
     listenAddrs = ["/ip4/0.0.0.0/tcp/4010/ws"],
+    announceAddrs,
     bootstrapAddrs = [],
   } = config;
+
+  const addresses: { listen: string[]; announce?: string[] } = { listen: listenAddrs };
+  if (announceAddrs && announceAddrs.length > 0) {
+    addresses.announce = announceAddrs;
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
   const node: FhsNode = await createLibp2p({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     privateKey: identity.privateKey as any,
-    addresses: { listen: listenAddrs },
+    addresses,
     transports: [webSockets()],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],

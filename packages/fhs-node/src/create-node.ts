@@ -28,6 +28,13 @@ export interface FhsNodeConfig {
   /** Direcciones de escucha. Default: ['/ip4/0.0.0.0/tcp/0/ws'] */
   listenAddrs?: string[];
   /**
+   * Direcciones que el nodo anuncia a sus peers (override de las detectadas).
+   * Útil en entornos containerizados donde la IP local no es alcanzable
+   * desde otros containers (ej. pasta networking: anunciar 169.254.1.2 en lugar
+   * de 192.168.1.139 para que otros containers puedan hacer dial).
+   */
+  announceAddrs?: string[];
+  /**
    * Multiaddrs de los bootstrap peers (ej. Atlas).
    * Al arrancar el nodo los conectará automáticamente para unirse al swarm.
    */
@@ -41,7 +48,7 @@ export interface FhsNodeConfig {
    * Transport factory a usar. Default: webSockets().
    * Pasar memory() para tests.
    */
-   
+
   transport?: any;
 }
 
@@ -56,14 +63,20 @@ export async function createFhsNode(config: FhsNodeConfig): Promise<FhsNode> {
   const {
     identity,
     listenAddrs = ["/ip4/0.0.0.0/tcp/0/ws"],
+    announceAddrs,
     bootstrapAddrs = [],
     dhtMode = "client",
     transport,
   } = config;
 
+  const addresses: { listen: string[]; announce?: string[] } = { listen: listenAddrs };
+  if (announceAddrs && announceAddrs.length > 0) {
+    addresses.announce = announceAddrs;
+  }
+
   const node = await createLibp2p({
     privateKey: identity.privateKey,
-    addresses: { listen: listenAddrs },
+    addresses,
     transports: [transport ?? webSockets()],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
