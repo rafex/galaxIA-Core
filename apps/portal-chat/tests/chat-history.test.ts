@@ -7,8 +7,8 @@ import {
   loadChatHistory,
   saveChatHistory,
   upsertConversation,
-} from "./chat-history.js";
-import type { ChatMessage } from "../types/fhs.js";
+} from "../src/services/chat-history.js";
+import type { ChatMessage } from "../src/types/fhs.js";
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
