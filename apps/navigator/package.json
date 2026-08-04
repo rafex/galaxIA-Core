@@ -1,6 +1,6 @@
 {
   "name": "@rafex/galaxia-navigator",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": false,
   "type": "module",
   "description": "Navigator (Agent Runtime) de FHS v0.1: orquesta LLM/tools v\u00eda Atlas + API REST/WS de chat.",
