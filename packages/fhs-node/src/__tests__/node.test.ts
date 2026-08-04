@@ -12,9 +12,14 @@ import { subscribe, publish } from "../gossipsub.js";
 import { dhtPut, dhtGet, dhtBeaconKey } from "../dht.js";
 import { handleFhsStream, openFhsStream } from "../stream.js";
 import { FHS_STREAM_PROTOCOL } from "../constants.js";
+import type { FhsWireCodec } from "../wire.js";
 
  
 const nodes: any[] = [];
+const bytesCodec: FhsWireCodec<Uint8Array> = {
+  encode: (value) => value,
+  decode: (value) => value,
+};
 
 afterEach(async () => {
   for (const n of nodes.splice(0)) {
@@ -54,19 +59,19 @@ describe("gossipsub", () => {
 
     // Subscribir ANTES de conectar para que el mesh ya tenga la suscripción
     const received: unknown[] = [];
-    subscribe(n2, "fhs/test", (msg) => received.push(msg));
-    subscribe(n1, "fhs/test", () => {}); // n1 también suscribe para forzar mesh bidireccional
+    subscribe(n2, "fhs/test", bytesCodec, (msg) => received.push(msg));
+    subscribe(n1, "fhs/test", bytesCodec, () => {}); // n1 también suscribe para forzar mesh bidireccional
 
     // Conectar n2 a n1 y esperar mesh + intercambio de suscripciones
     const n1Addr = n1.getMultiaddrs()[0];
     await n2.dial(n1Addr);
     await wait(2000);
 
-    await publish(n1, "fhs/test", { hello: "world" });
+    await publish(n1, "fhs/test", bytesCodec, Uint8Array.from([1, 2, 3]));
     await wait(2000);
 
     expect(received).toHaveLength(1);
-    expect(received[0]).toEqual({ hello: "world" });
+    expect(received[0]).toEqual(Uint8Array.from([1, 2, 3]));
   });
 });
 
@@ -80,11 +85,12 @@ describe("DHT", () => {
     await wait(3000); // KadDHT necesita tiempo para estabilizar el routing table
 
     const key = dhtBeaconKey("did:key:zTest123");
-    await dhtPut(n1, key, { did: "did:key:zTest123", test: true });
+    const value = Uint8Array.from([0x0a, 0x0b, 0x0c]);
+    await dhtPut(n1, key, bytesCodec, value);
 
-    const result = await dhtGet<{ did: string; test: boolean }>(n1, key);
+    const result = await dhtGet(n1, key, bytesCodec);
     expect(result).not.toBeNull();
-    expect(result?.did).toBe("did:key:zTest123");
+    expect(result).toEqual(value);
   });
 });
 
@@ -98,16 +104,16 @@ describe("stream directo", () => {
     await wait(400);
 
     const received: unknown[] = [];
-    handleFhsStream(n1, (msg) => {
+    handleFhsStream(n1, bytesCodec, (msg) => {
       received.push(msg);
     });
 
     // n2 abre stream directo a n1
-    await openFhsStream(n2, id1.peerId, { type: "handshake", did: id1.did });
+    await openFhsStream(n2, id1.peerId, bytesCodec, Uint8Array.from([0x01, 0x02]));
     await wait(400);
 
     expect(received).toHaveLength(1);
-    expect((received[0] as { type: string }).type).toBe("handshake");
+    expect(received[0]).toEqual(Uint8Array.from([0x01, 0x02]));
   });
 
   it("el protocolo registrado es " + FHS_STREAM_PROTOCOL, () => {

@@ -4,13 +4,19 @@
  * Las claves deben tener un namespace registrado en kad-dht (ver create-node.ts).
  */
 
-import { toString, fromString } from "uint8arrays";
+import { fromString } from "uint8arrays";
 import type { FhsNode } from "./create-node.js";
+import type { FhsWireCodec } from "./wire.js";
 
-/** Publica un valor en el DHT. Usa un AbortSignal de 5s para no bloquearse indefinidamente. */
-export async function dhtPut(node: FhsNode, key: string, value: unknown): Promise<void> {
+/** Publica un valor Protobuf en el DHT. Usa un AbortSignal de 5s. */
+export async function dhtPut<T>(
+  node: FhsNode,
+  key: string,
+  codec: FhsWireCodec<T>,
+  value: T,
+): Promise<void> {
   const keyBytes = fromString(key, "utf8");
-  const valueBytes = fromString(JSON.stringify(value), "utf8");
+  const valueBytes = codec.encode(value);
   const signal = AbortSignal.timeout(5_000);
   for await (const _ of node.services.dht.put(keyBytes, valueBytes, { signal })) {
     void _;
@@ -21,13 +27,13 @@ export async function dhtPut(node: FhsNode, key: string, value: unknown): Promis
  * Lee un valor del DHT iterando los QueryEvents.
  * Devuelve el primer ValueEvent encontrado, o `null` si no hay ninguno.
  */
-export async function dhtGet<T = unknown>(node: FhsNode, key: string): Promise<T | null> {
+export async function dhtGet<T>(node: FhsNode, key: string, codec: FhsWireCodec<T>): Promise<T | null> {
   const keyBytes = fromString(key, "utf8");
   const signal = AbortSignal.timeout(5_000);
   try {
     for await (const event of node.services.dht.get(keyBytes, { signal })) {
       if (event.name === "VALUE" && event.value instanceof Uint8Array) {
-        return JSON.parse(toString(event.value, "utf8")) as T;
+        return codec.decode(event.value);
       }
     }
   } catch {

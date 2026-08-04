@@ -1,25 +1,21 @@
-/**
- * Helpers GossipSub para nodos FHS.
- * Todos los mensajes se serializan como JSON (UTF-8).
- */
+/** Helpers GossipSub para mensajes Protobuf binarios FHS. */
 
-import { fromString, toString } from "uint8arrays";
 import type { FhsNode } from "./create-node.js";
+import type { FhsWireCodec } from "./wire.js";
 
 /** Suscribe a un topic de GossipSub y llama a `handler` con cada mensaje. */
-export function subscribe<T = unknown>(
+export function subscribe<T>(
   node: FhsNode,
   topic: string,
+  codec: FhsWireCodec<T>,
   handler: (msg: T) => void,
 ): void {
    
   node.services.pubsub.addEventListener("message", (evt: any) => {
     if (evt.detail?.topic !== topic) return;
     try {
-      const data = evt.detail.data instanceof Uint8Array
-        ? evt.detail.data
-        : fromString(toString(evt.detail.data, "utf8"), "utf8");
-      handler(JSON.parse(toString(data, "utf8")) as T);
+      const data = evt.detail.data instanceof Uint8Array ? evt.detail.data : evt.detail.data.slice();
+      handler(codec.decode(data));
     } catch {
       // Mensaje mal formado — ignorar
     }
@@ -27,10 +23,14 @@ export function subscribe<T = unknown>(
   node.services.pubsub.subscribe(topic);
 }
 
-/** Publica un mensaje JSON en un topic de GossipSub. */
-export async function publish(node: FhsNode, topic: string, payload: unknown): Promise<void> {
-  const data = fromString(JSON.stringify(payload), "utf8");
-  await node.services.pubsub.publish(topic, data);
+/** Publica un mensaje Protobuf binario en un topic de GossipSub. */
+export async function publish<T>(
+  node: FhsNode,
+  topic: string,
+  codec: FhsWireCodec<T>,
+  payload: T,
+): Promise<void> {
+  await node.services.pubsub.publish(topic, codec.encode(payload));
 }
 
 /** Da de baja todos los listeners de un topic y deja de recibirlo. */
