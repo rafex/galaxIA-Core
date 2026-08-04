@@ -65,6 +65,8 @@ jobs:
           npm install
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Generar certificado HTTPS de pruebas del portal
+        run: npm run generate:cert -w apps/portal-chat
       - run: npm run test --workspaces
 
   build:
@@ -86,7 +88,7 @@ jobs:
           npm run build -w packages/fhs-node
           npm run build --workspaces
 
-  e2e-smoke:
+  p2p-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -100,26 +102,10 @@ jobs:
           npm install
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build (atlas, navigator)
+      - name: Build (Atlas, Navigator)
         run: |
           npm run build -w packages/fhs-node
           npm run build -w apps/atlas
           npm run build -w apps/navigator
-      - name: Levantar Atlas + Navigator y correr el smoke E2E
-        run: |
-          PORT=8081 HOST=127.0.0.1 MDNS_ENABLED=false \
-            ATLAS_DB_PATH=/tmp/e2e-atlas.db IDENTITY_KEY_PATH=/tmp/e2e-atlas-id.pem \
-            node apps/atlas/dist/index.js > /tmp/atlas.log 2>&1 &
-          PORT=8090 HOST=127.0.0.1 ATLAS_URL=http://127.0.0.1:8081 \
-            NAVIGATOR_IDENTITY_KEY_PATH=/tmp/e2e-nav-id.pem \
-            node apps/navigator/dist/index.js > /tmp/navigator.log 2>&1 &
-          for _ in $(seq 1 20); do
-            curl -sf http://127.0.0.1:8081/health >/dev/null && curl -sf http://127.0.0.1:8090/health >/dev/null && break
-            sleep 1
-          done
-          ATLAS_URL=http://127.0.0.1:8081 NAVIGATOR_URL=http://127.0.0.1:8090 npx tsx scripts/e2e-smoke.ts
-      - name: Logs de Atlas/Navigator (siempre)
-        if: always()
-        run: |
-          echo "::group::atlas.log"; cat /tmp/atlas.log || true; echo "::endgroup::"
-          echo "::group::navigator.log"; cat /tmp/navigator.log || true; echo "::endgroup::"
+      - name: Smoke de transporte P2P libp2p
+        run: npm run test -w packages/fhs-node
