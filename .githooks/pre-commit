@@ -13,4 +13,11 @@ npm run typecheck --workspaces --prefix "$ROOT"
 echo "→ Regenerando version.json..."
 "$ROOT/helpers/scripts/shell/gen-version.sh"
 
+# La versión generada es parte del artefacto versionado: el commit debe
+# incluir siempre el estado que acaba de producir el hook.
+git -C "$ROOT" add -- \
+  apps/atlas/src/version.json \
+  apps/navigator/src/version.json \
+  apps/portal-chat/public/version.json
+
 echo "✓ pre-commit OK"
