@@ -6,11 +6,11 @@ import { WebSocketsSecure } from "@multiformats/multiaddr-matcher";
  * peer identity is learned and authenticated by libp2p/FHS after dialing; it
  * must not be copied into the portal build as a fragile literal.
  */
-export const NAVIGATOR_BOOTSTRAP_STORAGE_KEY = "fhs.navigator.bootstrap-addrs";
+export const FHS_BOOTSTRAP_STORAGE_KEY = "fhs.bootstrap-addrs";
 
 const TRAILING_P2P_COMPONENT = /\/p2p\/[^/]+$/;
 
-export function normalizeNavigatorBootstrapAddress(rawAddress: string): string {
+export function normalizeBootstrapAddress(rawAddress: string): string {
   const candidate = rawAddress.trim().replace(TRAILING_P2P_COMPONENT, "");
   if (!candidate) {
     throw new Error("La dirección de bootstrap está vacía");
@@ -28,26 +28,26 @@ export function normalizeNavigatorBootstrapAddress(rawAddress: string): string {
   return address.decapsulateCode(CODE_P2P).toString();
 }
 
-export function parseNavigatorBootstrapAddresses(rawValues: Array<string | undefined>): string[] {
+export function parseBootstrapAddresses(rawValues: Array<string | undefined>): string[] {
   const addresses = new Set<string>();
   for (const rawValue of rawValues) {
     for (const rawAddress of (rawValue ?? "").split(/[\n,]+/)) {
       if (!rawAddress.trim()) continue;
-      addresses.add(normalizeNavigatorBootstrapAddress(rawAddress));
+      addresses.add(normalizeBootstrapAddress(rawAddress));
     }
   }
   return [...addresses];
 }
 
-export function resolveNavigatorBootstrapAddresses(
+export function resolveBootstrapAddresses(
   envValues: Array<string | undefined>,
   storage?: Pick<Storage, "getItem">,
 ): string[] {
-  const storedValue = storage?.getItem(NAVIGATOR_BOOTSTRAP_STORAGE_KEY) ?? undefined;
-  return parseNavigatorBootstrapAddresses([...envValues, storedValue]);
+  const storedValue = storage?.getItem(FHS_BOOTSTRAP_STORAGE_KEY) ?? undefined;
+  return parseBootstrapAddresses([...envValues, storedValue]);
 }
 
-export async function loadNavigatorBootstrapAddresses(
+export async function loadBootstrapAddresses(
   envValues: Array<string | undefined>,
   storage: Pick<Storage, "getItem"> | undefined,
   fetcher: typeof fetch = fetch,
@@ -63,17 +63,17 @@ export async function loadNavigatorBootstrapAddresses(
   }
 
   if (response?.ok) {
-    let config: { navigatorBootstrapAddrs?: unknown };
+    let config: { bootstrapAddrs?: unknown };
     try {
-      config = (await response.json()) as { navigatorBootstrapAddrs?: unknown };
+      config = (await response.json()) as { bootstrapAddrs?: unknown };
     } catch {
       throw new Error("p2p-config.json no contiene JSON válido");
     }
-    if (config.navigatorBootstrapAddrs !== undefined && typeof config.navigatorBootstrapAddrs !== "string") {
-      throw new Error("p2p-config.json.navigatorBootstrapAddrs debe ser texto");
+    if (config.bootstrapAddrs !== undefined && typeof config.bootstrapAddrs !== "string") {
+      throw new Error("p2p-config.json.bootstrapAddrs debe ser texto");
     }
-    runtimeValue = config.navigatorBootstrapAddrs;
+    runtimeValue = config.bootstrapAddrs;
   }
 
-  return resolveNavigatorBootstrapAddresses([runtimeValue, ...envValues], storage);
+  return resolveBootstrapAddresses([runtimeValue, ...envValues], storage);
 }

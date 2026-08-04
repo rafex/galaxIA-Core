@@ -23,13 +23,6 @@
 # levantar los servicios que corren ahí.
 
 services:
-  atlas:
-    environment:
-      - TLS_CERT_PATH=/certs/dev.crt
-      - TLS_KEY_PATH=/certs/dev.key
-    volumes:
-      - ${CERTS_DIR:-../certs}:/certs:ro
-
   navigator:
     environment:
       - TLS_CERT_PATH=/certs/dev.crt

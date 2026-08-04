@@ -15,23 +15,21 @@ const FHS_BOOTSTRAP_ADDRS = process.env.FHS_BOOTSTRAP_ADDRS
   : [];
 const FHS_LISTEN_ADDRS = process.env.FHS_LISTEN_ADDRS
   ? process.env.FHS_LISTEN_ADDRS.split(",").map((a) => a.trim())
-  : ["/ip4/0.0.0.0/tcp/4010/ws"];
+  : ["/ip4/0.0.0.0/tcp/4010/tls/ws"];
 const FHS_ANNOUNCE_ADDRS = process.env.FHS_ANNOUNCE_ADDRS
   ? process.env.FHS_ANNOUNCE_ADDRS.split(",").map((a) => a.trim())
   : undefined;
 const IDENTITY_KEY_PATH = process.env.IDENTITY_KEY_PATH ?? "./.fhs-identity-navigator.json";
 
 async function main() {
-  const tlsEnabled = !!(TLS_CERT_PATH && TLS_KEY_PATH);
+  if (!TLS_CERT_PATH || !TLS_KEY_PATH) {
+    throw new Error("Navigator requiere TLS_CERT_PATH y TLS_KEY_PATH; la API de observabilidad no admite HTTP");
+  }
 
-  const app = (
-    tlsEnabled
-      ? Fastify({
-          logger: true,
-          https: { cert: readFileSync(TLS_CERT_PATH), key: readFileSync(TLS_KEY_PATH) },
-        })
-      : Fastify({ logger: true })
-  ) as FastifyInstance;
+  const app = Fastify({
+    logger: true,
+    https: { cert: readFileSync(TLS_CERT_PATH), key: readFileSync(TLS_KEY_PATH) },
+  }) as FastifyInstance;
 
   const eventBus = new EventBus();
 
@@ -55,7 +53,7 @@ async function main() {
 
   try {
     await app.listen({ port: PORT, host: HOST });
-    app.log.info(`Navigator running at ${tlsEnabled ? "https" : "http"}://${HOST}:${PORT} (FHS: libp2p)`);
+    app.log.info(`Navigator HTTPS de observabilidad en https://${HOST}:${PORT} (FHS: libp2p)`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

@@ -22,6 +22,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@libp2p/websockets": "10.1.19",
     "@rafex/galaxia-fhs-node": "*",
     "@rafex/galaxia-fhs-protocol": "npm:@rafex_labs/galaxia-fhs-protocol@^0.1.33",
     "bonjour-service": "1.4.2",

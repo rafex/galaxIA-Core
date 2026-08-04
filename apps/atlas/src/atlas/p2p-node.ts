@@ -11,6 +11,8 @@
  */
 
 import { createFhsNode, loadOrCreateFhsIdentity } from "@rafex/galaxia-fhs-node";
+import { readFileSync } from "node:fs";
+import { webSockets } from "@libp2p/websockets";
 import {
   TOPIC_NODES_ADVERTISE,
   TOPIC_MISSIONS_OFFER,
@@ -22,6 +24,8 @@ import {
 export interface AtlasP2pConfig {
   identityKeyPath: string;
   listenAddrs: string[];
+  tlsCertPath?: string;
+  tlsKeyPath?: string;
 }
 
 const RELAY_TOPICS = [
@@ -34,11 +38,24 @@ const RELAY_TOPICS = [
 
 export async function startAtlasNode(config: AtlasP2pConfig) {
   const identity = await loadOrCreateFhsIdentity(config.identityKeyPath);
+  const tlsRequired = config.listenAddrs.some((address) => address.includes("/tls/ws"));
+  if (tlsRequired && (!config.tlsCertPath || !config.tlsKeyPath)) {
+    throw new Error("Atlas requiere TLS_CERT_PATH y TLS_KEY_PATH para escuchar en /tls/ws");
+  }
+  const transport = config.tlsCertPath && config.tlsKeyPath
+    ? webSockets({
+        https: {
+          cert: readFileSync(config.tlsCertPath),
+          key: readFileSync(config.tlsKeyPath),
+        },
+      })
+    : webSockets();
 
   const node = await createFhsNode({
     identity,
     listenAddrs: config.listenAddrs,
     dhtMode: "server",
+    transport,
   });
 
   await node.start();

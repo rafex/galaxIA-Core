@@ -34,7 +34,7 @@ docker compose up --build
 | Servicio | URL local | Descripción |
 |---|---|---|
 | Frontend | https://localhost:8443 | Portal HTTPS-only; el chat usa libp2p/WSS |
-| Atlas/Navigator | libp2p `/ws` y `/tls/ws` | Bootstrap, DHT, GossipSub y streams FHS |
+| Atlas/Navigator | libp2p `/tls/ws` | Bootstrap, DHT, GossipSub y streams FHS |
 
 ### 3. Conectar llama.cpp
 
@@ -47,28 +47,18 @@ npx tsx scripts/mock-providers.ts
 O edita el script para apuntar a tu llama-server real.
 
 El portal requiere una o varias multiaddrs `.../tls/ws` de bootstrap del
-Navigator en `FHS_NAVIGATOR_BOOTSTRAP_ADDRS` al arrancar el contenedor,
+swarm en `FHS_BOOTSTRAP_ADDRS` al arrancar el contenedor,
 separadas por comas o saltos de línea. La configuración se genera como un
-archivo estático servido por HTTPS; no se incrusta en la imagen. No se debe
-fijar `/p2p/<PeerID>` en el frontend:
-libp2p aprende la identidad durante Identify/Noise y la sesión se autentica
-con el handshake FHS firmado. El certificado del portal es autofirmado y debe
-aceptarse explícitamente en el navegador.
+archivo estático servido por HTTPS; no se incrusta en la imagen. El peer de
+bootstrap no tiene que ser Navigator. No se debe fijar `/p2p/<PeerID>` en el frontend:
+libp2p entra al DHT/GossipSub, descubre el Navigator mediante `NodeAdvertiseMessage`
+firmado y aprende la identidad del stream durante Identify/Noise. La sesión se
+autentica con el handshake FHS firmado. El certificado del portal es
+autofirmado y debe aceptarse explícitamente en el navegador.
 
-## Desarrollo sin contenedores
+## Desarrollo
 
-Si prefieres desarrollar localmente:
-
-```bash
-# Terminal 1
-npm run dev -w apps/navigator
-
-# Terminal 2
-npm run dev -w apps/portal-chat
-
-# Terminal 3 (OCR)
-cd containers/ocr-mcp
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-PORT=8082 REGISTRY_URL=ws://localhost:8081/fhs/v1/ws python ocr_server.py
-```
+El MVP se valida dentro de contenedores Podman. Usa `compose.yaml` para
+construir el stack; los proveedores externos (OCR y LLM) deben incorporarse
+como peers FHS y anunciar sus capabilities por GossipSub. No se admite un
+registro WebSocket legado ni ejecución directa de servicios FHS en el host.

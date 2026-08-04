@@ -108,6 +108,10 @@ export async function initP2pProviders(config: P2pConfig, eventBus?: import("../
     pubsubPublish(node, TOPIC_NODES_ADVERTISE, advertise, nodeAdvertiseCodec);
   };
   advertise();
+  // Un peer nuevo (incluido un Portal web) debe recibir presencia sin esperar
+  // el siguiente intervalo de 30s. El anuncio sigue siendo Protobuf firmado;
+  // este evento solo reduce la latencia del discovery inicial.
+  node.addEventListener("peer:connect", () => advertise());
   setInterval(advertise, ADVERTISE_INTERVAL_MS);
 
   const p2pAtlas = new P2pAtlasClient(peerCache);

@@ -1,6 +1,6 @@
 # Contenedor de Navigator (Orquestador P2P) FHS — DEC-0088
-# Puerto 8090: API REST/SSE para portal-chat.
-# Puerto 4010: WebSocket libp2p (para misiones P2P directas).
+# Puerto 8090: API HTTPS local de health.
+# Puerto 4010: TLS WebSocket libp2p (para misiones P2P directas).
 #
 # @rafex/galaxia-fhs-protocol se instala desde GitHub Packages.
 # Pasar el token como secret de BuildKit:
@@ -39,7 +39,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8090
 ENV HOST=0.0.0.0
-ENV FHS_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/ws
+ENV FHS_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/tls/ws
+ENV TLS_CERT_PATH=/certs/dev.crt
+ENV TLS_KEY_PATH=/certs/dev.key
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules

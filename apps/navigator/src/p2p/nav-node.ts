@@ -181,12 +181,17 @@ export interface NavNodeConfig {
 export async function createNavNode(config: NavNodeConfig): Promise<FhsNode> {
   const {
     identity,
-    listenAddrs = ["/ip4/0.0.0.0/tcp/4010/ws"],
+    listenAddrs = ["/ip4/0.0.0.0/tcp/4010/tls/ws"],
     announceAddrs,
     bootstrapAddrs = [],
     tlsCertPath,
     tlsKeyPath,
   } = config;
+
+  const tlsRequired = listenAddrs.some((address) => address.includes("/tls/ws"));
+  if (tlsRequired && (!tlsCertPath || !tlsKeyPath)) {
+    throw new Error("Navigator requiere TLS_CERT_PATH y TLS_KEY_PATH para escuchar en /tls/ws");
+  }
 
   const addresses: { listen: string[]; announce?: string[] } = { listen: listenAddrs };
   if (announceAddrs && announceAddrs.length > 0) {

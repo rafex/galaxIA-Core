@@ -18,8 +18,8 @@
 # Para un despliegue multi-host (Atlas/Navigator/Portal en máquinas
 # distintas), no se usa este archivo tal cual en las tres — se corre cada
 # servicio por separado (`podman run` directo, o un compose de un solo
-# servicio) en su propia máquina, con ATLAS_URL/NAVIGATOR_URL apuntando a
-# la IP real de las otras — ver docs/instalacion.md.
+# servicio) en su propia máquina, con FHS_BOOTSTRAP_ADDRS apuntando a peers
+# TLS reales — ver docs/instalacion.md.
 
 services:
   atlas:
@@ -30,8 +30,13 @@ services:
     environment:
       - PORT=8081
       - HOST=0.0.0.0
+      - FHS_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4001/tls/ws
+      - TLS_CERT_PATH=/certs/dev.crt
+      - TLS_KEY_PATH=/certs/dev.key
+      - IDENTITY_KEY_PATH=/app/apps/atlas/data/.fhs-identity-atlas.json
     volumes:
       - atlas-data:/app/apps/atlas/data
+      - ${CERTS_DIR:-../certs}:/certs:ro
     networks:
       - fhs
     restart: unless-stopped
@@ -65,7 +70,7 @@ services:
     environment:
       - PORTAL_CERT_CN=${PORTAL_CERT_CN:-localhost}
       - PORTAL_CERT_SAN=${PORTAL_CERT_SAN:-DNS:localhost,IP:127.0.0.1}
-      - FHS_NAVIGATOR_BOOTSTRAP_ADDRS=${FHS_NAVIGATOR_BOOTSTRAP_ADDRS:-}
+      - FHS_BOOTSTRAP_ADDRS=${FHS_BOOTSTRAP_ADDRS:-}
     depends_on:
       - navigator
       - atlas

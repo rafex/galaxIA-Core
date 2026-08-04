@@ -1,12 +1,5 @@
 import { create } from "@bufbuild/protobuf";
 import { generateKeyPair, publicKeyFromRaw } from "@libp2p/crypto/keys";
-import { identify } from "@libp2p/identify";
-import { webSockets } from "@libp2p/websockets";
-import { noise } from "@chainsafe/libp2p-noise";
-import { yamux } from "@chainsafe/libp2p-yamux";
-import { createLibp2p } from "libp2p";
-import { multiaddr } from "@multiformats/multiaddr";
-import { WebSocketsSecure } from "@multiformats/multiaddr-matcher";
 import { base58btc } from "multiformats/bases/base58";
 import type { AgentEvent } from "../types/fhs.js";
 import * as FhsProto from "@rafex/galaxia-fhs-protocol/generated";
@@ -17,7 +10,8 @@ import {
   newEnvelope,
 } from "@rafex/galaxia-fhs-protocol/wire";
 import { FHS_STREAM_PROTOCOL } from "@rafex/galaxia-fhs-protocol/constants";
-import { loadNavigatorBootstrapAddresses } from "./p2p-config.js";
+import { loadBootstrapAddresses } from "./p2p-config.js";
+import { createPortalP2pNode, discoverNavigator, type P2pStream, type PortalP2pNode } from "./p2p-discovery.js";
 
 export interface ApiOptions {
   conversationId?: string;
@@ -46,22 +40,13 @@ export interface ChatConnection {
   close(): void;
 }
 
-interface P2pStream extends AsyncIterable<unknown> {
-  send(data: Uint8Array): void;
-}
-
-interface P2pNode {
-  dial(address: unknown): Promise<{ newStream(protocol: string): Promise<P2pStream> }>;
-  stop(): Promise<void>;
-}
-
 type P2pPrivateKey = Awaited<ReturnType<typeof generateKeyPair>>;
 
 export function connectToChat(
   onEvent: (event: AgentEvent) => void,
   onOpen?: () => void,
 ): ChatConnection {
-  let node: P2pNode | undefined;
+  let node: PortalP2pNode | undefined;
   let stream: P2pStream | undefined;
   let pending: ApiOptions | null = null;
   let closedByCaller = false;
@@ -73,57 +58,27 @@ export function connectToChat(
   void openSession();
 
   async function openSession(): Promise<void> {
-    let navigatorBootstrapAddrs: string[];
+    let bootstrapAddrs: string[];
     try {
-      navigatorBootstrapAddrs = await loadNavigatorBootstrapAddresses(
-        [
-          import.meta.env.VITE_FHS_NAVIGATOR_BOOTSTRAP_ADDRS as string | undefined,
-          // Read the old variable as a migration aid, but normalize it as a
-          // transport-only address and never trust its embedded peer id.
-          import.meta.env.VITE_FHS_NAVIGATOR_MULTIADDR as string | undefined,
-        ],
+      bootstrapAddrs = await loadBootstrapAddresses(
+        [import.meta.env.VITE_FHS_BOOTSTRAP_ADDRS as string | undefined],
         typeof localStorage === "undefined" ? undefined : localStorage,
       );
     } catch (error) {
       onEvent({ type: "error", data: { code: "P2P_CONFIG", message: error instanceof Error ? error.message : String(error) } });
       return;
     }
-    if (navigatorBootstrapAddrs.length === 0) {
-      onEvent({ type: "error", data: { code: "P2P_CONFIG", message: "Falta FHS_NAVIGATOR_BOOTSTRAP_ADDRS o fhs.navigator.bootstrap-addrs" } });
+    if (bootstrapAddrs.length === 0) {
+      onEvent({ type: "error", data: { code: "P2P_CONFIG", message: "Falta FHS_BOOTSTRAP_ADDRS o fhs.bootstrap-addrs" } });
       return;
     }
 
     try {
       privateKey = await generateKeyPair("Ed25519");
       sourcePeerId = didFromRaw(privateKey.publicKey.raw);
-      node = await createLibp2p({
-        privateKey,
-        addresses: { listen: [] },
-        transports: [webSockets()],
-        // libp2p's browser default denies private addresses. The GalaxIA
-        // portal intentionally dials the Navigator over the private LAN,
-        // but only through the TLS WebSocket transport.
-        connectionGater: {
-          denyDialMultiaddr: (address) => !WebSocketsSecure.matches(address),
-        },
-        connectionEncrypters: [noise()],
-        streamMuxers: [yamux()],
-        services: { identify: identify() },
-      }) as unknown as P2pNode;
-      let connection: { newStream(protocol: string): Promise<P2pStream> } | undefined;
-      const dialErrors: string[] = [];
-      for (const bootstrapAddress of navigatorBootstrapAddrs) {
-        try {
-          connection = await node.dial(multiaddr(bootstrapAddress));
-          break;
-        } catch (error) {
-          dialErrors.push(`${bootstrapAddress}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      if (!connection) {
-        throw new Error(`No se pudo conectar a ningún bootstrap Navigator: ${dialErrors.join(" | ")}`);
-      }
-      const openedStream = await connection.newStream(FHS_STREAM_PROTOCOL);
+      node = await createPortalP2pNode(privateKey);
+      const discovered = await discoverNavigator(node, bootstrapAddrs);
+      const openedStream = await discovered.connection.newStream(FHS_STREAM_PROTOCOL);
       stream = openedStream;
 
       await sendEnvelope(openedStream, makeHandshake(privateKey.publicKey.raw), privateKey);

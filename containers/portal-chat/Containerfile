@@ -40,7 +40,7 @@ RUN chmod 0755 /docker-entrypoint.d/09-generate-p2p-config.sh /docker-entrypoint
 
 ENV PORTAL_CERT_CN=localhost
 ENV PORTAL_CERT_SAN=DNS:localhost,IP:127.0.0.1
-ENV FHS_NAVIGATOR_BOOTSTRAP_ADDRS=
+ENV FHS_BOOTSTRAP_ADDRS=
 
 EXPOSE 443
 
