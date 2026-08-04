@@ -30,7 +30,7 @@
   "dependencies": {
     "@fastify/http-proxy": "11.5.0",
     "@fastify/static": "9.3.0",
-    "@rafex/galaxia-fhs-protocol": "^0.1.26",
+    "@rafex/galaxia-fhs-protocol": "npm:@rafex_labs/galaxia-fhs-protocol@^0.1.26",
     "fastify": "5.10.0"
   }
 }

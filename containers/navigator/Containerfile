@@ -18,9 +18,8 @@ COPY package*.json .npmrc ./
 COPY packages/fhs-node/package.json ./packages/fhs-node/
 COPY apps/navigator/package.json ./apps/navigator/
 
-# Instalar dependencias (fhs-protocol viene de GitHub Packages)
-RUN --mount=type=secret,id=node_auth_token \
-    export NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token)" && npm install --ignore-scripts
+# Instalar dependencias (fhs-protocol instala desde npmjs.org via alias npm:@rafex_labs/)
+RUN npm install --ignore-scripts
 
 # Copiar código fuente y construir
 COPY packages/fhs-node ./packages/fhs-node
