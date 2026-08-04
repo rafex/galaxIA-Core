@@ -28,8 +28,11 @@ on:
     branches: ["main"]
     paths:
       - "apps/atlas/**"
+      - "!apps/atlas/src/version.json"
       - "apps/navigator/**"
+      - "!apps/navigator/src/version.json"
       - "apps/portal-chat/**"
+      - "!apps/portal-chat/public/version.json"
       - ".github/workflows/publish-packages.yml"
   workflow_dispatch:
     inputs:
