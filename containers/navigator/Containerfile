@@ -1,6 +1,11 @@
 # Contenedor de Navigator (Orquestador P2P) FHS — DEC-0088
 # Puerto 8090: API REST/SSE para portal-chat.
 # Puerto 4010: WebSocket libp2p (para misiones P2P directas).
+#
+# @rafex/galaxia-fhs-protocol se instala desde GitHub Packages.
+# Pasar el token como secret de BuildKit:
+#   podman build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
+#     -f containers/navigator/Containerfile .
 
 FROM docker.io/library/node:20-alpine AS builder
 WORKDIR /app
@@ -9,16 +14,15 @@ ARG COMMIT_HASH=unknown
 ARG BUILD_DATE=unknown
 
 # Copiar metadatos del workspace
-COPY package*.json ./
-COPY packages/fhs-protocol/package.json ./packages/fhs-protocol/
+COPY package*.json .npmrc ./
 COPY packages/fhs-node/package.json ./packages/fhs-node/
 COPY apps/navigator/package.json ./apps/navigator/
 
-# Instalar dependencias
-RUN npm ci
+# Instalar dependencias (fhs-protocol viene de GitHub Packages)
+RUN --mount=type=secret,id=node_auth_token \
+    export NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token)" && npm ci
 
 # Copiar código fuente y construir
-COPY packages/fhs-protocol ./packages/fhs-protocol
 COPY packages/fhs-node ./packages/fhs-node
 COPY apps/navigator ./apps/navigator
 
@@ -26,8 +30,7 @@ COPY apps/navigator ./apps/navigator
 RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
       > apps/navigator/src/version.json
 
-RUN npm run build -w packages/fhs-protocol && \
-    npm run build -w packages/fhs-node && \
+RUN npm run build -w packages/fhs-node && \
     npm run build -w apps/navigator
 
 # Imagen final mínima
@@ -40,8 +43,6 @@ ENV FHS_P2P_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/ws
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/fhs-protocol/package.json ./packages/fhs-protocol/
-COPY --from=builder /app/packages/fhs-protocol/dist ./packages/fhs-protocol/dist
 COPY --from=builder /app/packages/fhs-node/package.json ./packages/fhs-node/
 COPY --from=builder /app/packages/fhs-node/dist ./packages/fhs-node/dist
 COPY --from=builder /app/apps/navigator/package.json ./apps/navigator/

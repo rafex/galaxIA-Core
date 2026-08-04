@@ -2,6 +2,11 @@
 # Pure libp2p bootstrap peer: DHT server + FloodSub relay.
 # Puerto 8081: API REST de health/status.
 # Puerto 4001: WebSocket libp2p (bootstrap multiaddr).
+#
+# @rafex/galaxia-fhs-protocol se instala desde GitHub Packages.
+# Pasar el token como secret de BuildKit:
+#   podman build --secret id=node_auth_token,env=NODE_AUTH_TOKEN \
+#     -f containers/atlas/Containerfile .
 
 FROM docker.io/library/node:20-alpine AS builder
 WORKDIR /app
@@ -13,16 +18,15 @@ ARG BUILD_DATE=unknown
 RUN apk add --no-cache python3 make g++
 
 # Copiar metadatos del workspace
-COPY package*.json ./
-COPY packages/fhs-protocol/package.json ./packages/fhs-protocol/
+COPY package*.json .npmrc ./
 COPY packages/fhs-node/package.json ./packages/fhs-node/
 COPY apps/atlas/package.json ./apps/atlas/
 
-# Instalar dependencias
-RUN npm ci
+# Instalar dependencias (fhs-protocol viene de GitHub Packages)
+RUN --mount=type=secret,id=node_auth_token \
+    export NODE_AUTH_TOKEN="$(cat /run/secrets/node_auth_token)" && npm ci
 
 # Copiar código fuente y construir
-COPY packages/fhs-protocol ./packages/fhs-protocol
 COPY packages/fhs-node ./packages/fhs-node
 COPY apps/atlas ./apps/atlas
 
@@ -30,8 +34,7 @@ COPY apps/atlas ./apps/atlas
 RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
       > apps/atlas/src/version.json
 
-RUN npm run build -w packages/fhs-protocol && \
-    npm run build -w packages/fhs-node && \
+RUN npm run build -w packages/fhs-node && \
     npm run build -w apps/atlas
 
 # Imagen final mínima
@@ -46,8 +49,6 @@ ENV IDENTITY_KEY_PATH=/app/apps/atlas/data/.fhs-identity-atlas.json
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages/fhs-protocol/package.json ./packages/fhs-protocol/
-COPY --from=builder /app/packages/fhs-protocol/dist ./packages/fhs-protocol/dist
 COPY --from=builder /app/packages/fhs-node/package.json ./packages/fhs-node/
 COPY --from=builder /app/packages/fhs-node/dist ./packages/fhs-node/dist
 COPY --from=builder /app/apps/atlas/package.json ./apps/atlas/
