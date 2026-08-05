@@ -10,13 +10,17 @@ caída de infraestructura borre el contexto del diagnóstico.
 
 ## Estado actual
 
-El E2E está bloqueado temporalmente por infraestructura: la Raspberry Pi que
-aloja el proveedor OCR está apagada. Desde Bastion se observó `No route to
-host` hacia `192.168.1.167:4003`, y el vecino ARP aparece como `FAILED`. Por
-tanto, mientras la Raspberry no vuelva a la red es esperable que Navigator
-informe que no hay proveedores OCR disponibles. Esto no prueba un fallo de la
-última corrección de descubrimiento; esa corrección debe validarse cuando el
-proveedor vuelva a anunciarse por libp2p.
+La Raspberry Pi fue recuperada y el E2E se volvió a levantar el 2026-08-05.
+Atlas (`4001`), Navigator (`4010`), el LLM (`43110`), Satellite OCR (`4003`)
+y Portal HTTPS (`8443`) están activos. Satellite confirmó conexión al
+bootstrap y publicación de su beacon por libp2p. Falta ejecutar la prueba
+funcional desde el navegador con un mensaje y un PDF; hasta entonces el E2E se
+considera preparado, pero no cerrado.
+
+El apagado anterior queda registrado como una incidencia de infraestructura:
+desde Bastion se observó `No route to host` hacia `192.168.1.167:4003` y el
+vecino ARP apareció como `FAILED`. Durante ese estado era esperable que
+Navigator informara que no había proveedores OCR disponibles.
 
 ## Resumen cronológico
 
@@ -32,9 +36,9 @@ proveedor vuelva a anunciarse por libp2p.
 | E2E-008 | `[P2P_CONNECT] Incorrect length`. | Desacuerdo en el framing del stream o intento de decodificar un frame incompleto/no FHS como protobuf. | Se homogeneizó el framing length-prefixed y la decodificación de envelopes protobuf; se añadieron pruebas del wire. | Resuelto en código; requiere validación E2E completa. |
 | E2E-009 | `Cannot read properties of undefined (reading 'fields')`. | Un valor dinámico protobuf no tenía la estructura `DynamicObject.fields` esperada. | Se endureció la conversión de valores dinámicos: objetos usan `fields` y valores nulos/indefinidos se rechazan con error explícito. | Resuelto en código; no reproducido en la última prueba. |
 | E2E-010 | `No hay modelos disponibles con tool calling en tu scope`. | Discovery no encontró un proveedor/modelo LLM compatible con el scope y la capacidad de tool calling. | Resolución dinámica de proveedores/modelos y diagnóstico explícito de scope/capacidades, sin seleccionar un proveedor por nombre fijo. | Condicionado al despliegue del proveedor LLM y sus anuncios. |
-| E2E-011 | `No hay proveedores de OCR disponibles en tu scope`. | Navigator no tenía un peer OCR disponible en el scope; la Raspberry podía estar caída o no haber anunciado su beacon. | Discovery P2P por capacidades/beacons y comprobación de disponibilidad antes de invocar la herramienta. | Abierto por Raspberry apagada; no ejecutar cierre hasta recuperar `192.168.1.167`. |
-| E2E-012 | `No se pudo procesar el archivo adjunto` al subir un PDF. | Navigator resolvía la capacidad `document.ocr`, pero podía invocar ese identificador en vez del nombre real anunciado por Satellite (`extract_text`). El error del proveedor también se perdía y terminaba como mensaje genérico. | `P2pMcpHost` usa el nombre anunciado mediante tags `tool:*`; `AgentRuntime` devuelve `{text,error}` y Portal conserva el código/mensaje real. | Corrección publicada; E2E pendiente de la Raspberry. |
-| E2E-013 | PDF rechazado con `Incorrect length` o sin respuesta del LLM. | Se combinaban el problema de framing P2P y la disponibilidad/resolución del proveedor OCR; sin texto extraído no podía continuar el agente. | Corrección del wire protobuf, soporte de PDF en OCR y propagación de errores; Satellite procesa primero texto PDF y usa raster/OCR cuando es necesario. | Pendiente de repetir con Satellite operativo. |
+| E2E-011 | `No hay proveedores de OCR disponibles en tu scope`. | Navigator no tenía un peer OCR disponible en el scope; la Raspberry estaba caída o no había anunciado su beacon. | Discovery P2P por capacidades/beacons y comprobación de disponibilidad antes de invocar la herramienta. | Infraestructura recuperada; Satellite volvió a anunciarse. Pendiente prueba funcional. |
+| E2E-012 | `No se pudo procesar el archivo adjunto` al subir un PDF. | Navigator resolvía la capacidad `document.ocr`, pero podía invocar ese identificador en vez del nombre real anunciado por Satellite (`extract_text`). El error del proveedor también se perdía y terminaba como mensaje genérico. | `P2pMcpHost` usa el nombre anunciado mediante tags `tool:*`; `AgentRuntime` devuelve `{text,error}` y Portal conserva el código/mensaje real. | Corrección publicada; pendiente prueba funcional con Satellite operativo. |
+| E2E-013 | PDF rechazado con `Incorrect length` o sin respuesta del LLM. | Se combinaban el problema de framing P2P y la disponibilidad/resolución del proveedor OCR; sin texto extraído no podía continuar el agente. | Corrección del wire protobuf, soporte de PDF en OCR y propagación de errores; Satellite procesa primero texto PDF y usa raster/OCR cuando es necesario. | Satellite operativo; pendiente repetir la prueba PDF. |
 | E2E-014 | `No se pudo conectar a ningún bootstrap P2P: ... 192.168.1.139:4001`. | Atlas no era alcanzable desde el navegador/Navigator o no tenía disponible el listener TLS/WSS en `4001`. | Verificación de listener, firewall, certificados y multiaddr de bootstrap; Navigator se despliega con la dirección configurada, no con una ruta inventada por la UI. | Resuelto en configuración conocida; validar con Atlas activo. |
 | E2E-015 | Las solicitudes fallidas quedaban sin reintento cómodo. | El cliente no tenía una política de reconexión/reenvío asociada al mismo chat. | Reintentos automáticos con backoff y botón de fallback `↻ Reconectar` dentro del chat; se mantiene el mensaje fallido para reintentarlo. | Implementado; requiere prueba de caída/reconexión. |
 | E2E-016 | El usuario no podía recorrer prompts anteriores con las flechas. | El input no mantenía un índice de historial de prompts. | Historial local del chat con `↑/↓`, separado por conversación y sin enviar ese historial automáticamente por P2P. | Implementado. |
