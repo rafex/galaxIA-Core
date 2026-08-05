@@ -183,15 +183,20 @@ export function registerPortalSession(
                 break;
               }
               const runtime = new AgentRuntime(providers.atlasClient, eventBus, conversationId, remoteDid, providers.llmGateway, providers.mcpHost);
-              void runtime.extractOcrText(artifacts, artifactFilename(request.artifacts[0]), currentPreferences).then((result) => {
+              const filename = artifactFilename(request.artifacts[0]);
+              void runtime.extractOcrText(artifacts, filename, currentPreferences, false).then((result) => {
                 if (result.text) {
                   pendingAttachments.set(conversationId, {
                     text: result.text,
-                    filename: artifactFilename(request.artifacts[0]),
+                    filename,
                     question: lastMessage.content || undefined,
                     preferences: currentPreferences,
                     confirmed: false,
                   });
+                  // Register the pending attachment before notifying the Portal.
+                  // Otherwise a fast user click can arrive before the decision
+                  // handler has populated pendingAttachments (SPEC-OCRCONFIRM-0001).
+                  eventBus.emit({ type: "ocr.extracted", data: { conversationId, filename, text: result.text } });
                 } else {
                   sendError(
                     stream,

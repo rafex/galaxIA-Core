@@ -1,6 +1,6 @@
 # Histórico de incidencias del E2E
 
-Fecha de actualización: 2026-08-04
+Fecha de actualización: 2026-08-05
 Alcance: Portal Chat, Navigator, Atlas y proveedor OCR Satellite Star.
 
 Este documento conserva los fallos observados durante las pruebas E2E de la
@@ -42,6 +42,7 @@ Navigator informara que no había proveedores OCR disponibles.
 | E2E-014 | `No se pudo conectar a ningún bootstrap P2P: ... 192.168.1.139:4001`. | Atlas no era alcanzable desde el navegador/Navigator o no tenía disponible el listener TLS/WSS en `4001`. | Verificación de listener, firewall, certificados y multiaddr de bootstrap; Navigator se despliega con la dirección configurada, no con una ruta inventada por la UI. | Resuelto en configuración conocida; validar con Atlas activo. |
 | E2E-015 | Las solicitudes fallidas quedaban sin reintento cómodo. | El cliente no tenía una política de reconexión/reenvío asociada al mismo chat. | Reintentos automáticos con backoff y botón de fallback `↻ Reconectar` dentro del chat; se mantiene el mensaje fallido para reintentarlo. | Implementado; requiere prueba de caída/reconexión. |
 | E2E-016 | El usuario no podía recorrer prompts anteriores con las flechas. | El input no mantenía un índice de historial de prompts. | Historial local del chat con `↑/↓`, separado por conversación y sin enviar ese historial automáticamente por P2P. | Implementado. |
+| E2E-017 | El OCR se mostraba, pero `Usar documento` no continuaba con la pregunta original. | Navigator emitía `ocr.extracted` antes de insertar el adjunto en `pendingAttachments`; además, el Portal usaba un `conversationId` global en vez del `missionId` del evento. Un clic rápido podía perder la decisión y una pregunta posterior se procesaba sin el documento. | Se registra el estado pendiente antes de emitir el evento, el Portal envía la decisión con el `missionId` recibido y bloquea nuevas preguntas mientras espera confirmación. Si ya existía una pregunta, `Usar documento` la reanuda automáticamente. | Corregido en código; pendiente validar con PDF en el E2E redesplegado. |
 
 ## Detalle de la corrección OCR
 

@@ -364,12 +364,14 @@ export class AgentRuntime {
   /**
    * Ejecuta OCR sobre el artifact adjunto y emite `ocr.extracted`, sin llamar
    * al LLM — usado por el flujo de confirmación (SPEC-OCRCONFIRM-0001): el
-   * usuario ve el texto extraído antes de decidir si el LLM lo usa o no.
+   * usuario ve el texto extraído antes de decidir si el LLM lo usa o no. El
+   * Portal puede diferir la emisión para registrar primero su estado pendiente.
    */
   async extractOcrText(
     artifacts: string[],
     filename: string,
-    preferences: ModelPreferences
+    preferences: ModelPreferences,
+    emitExtractedEvent = true,
   ): Promise<OcrExtractionResult> {
     this.artifacts = artifacts;
     this.lastOcrError = undefined;
@@ -387,7 +389,7 @@ export class AgentRuntime {
 
     const text = await this.runOcrDeterministically(ocrTools, preferences);
     if (text) {
-      this.emit({ type: "ocr.extracted", data: { filename, text } });
+      if (emitExtractedEvent) this.emit({ type: "ocr.extracted", data: { filename, text } });
       return { text };
     }
     const ocrError: string | undefined = this.lastOcrError;
