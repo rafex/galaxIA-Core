@@ -1,6 +1,6 @@
 {
   "name": "@rafex/galaxia-navigator",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": false,
   "type": "module",
   "description": "Navigator (Agent Runtime) de FHS v0.1: orquesta LLM/tools mediante peers y streams libp2p.",
