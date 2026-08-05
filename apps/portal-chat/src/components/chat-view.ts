@@ -621,6 +621,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     const messageId = crypto.randomUUID();
     const artifacts = pendingAttachment ? [pendingAttachment] : undefined;
     const attachmentName = pendingAttachmentName;
+    if (artifacts) temporaryDocumentContext = null;
     addMessage({
       id: messageId,
       role: "user",
