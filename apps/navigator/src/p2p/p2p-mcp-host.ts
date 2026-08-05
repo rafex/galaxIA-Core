@@ -49,14 +49,14 @@ export class P2pMcpHost extends McpHost {
           ...peer.beacon.capabilities.map((capability) => capability.id),
           ...peer.beacon.agentCapabilities.map((capability) => capability.id),
         ];
-        for (const capabilityId of capabilityIds) {
+        for (const advertised of advertisedTools(peer.beacon.provider?.tags ?? [], capabilityIds)) {
           tools.push({
-            name: capabilityId,
-            description: `Capability '${capabilityId}' vía satellite P2P`,
+            name: advertised.name,
+            description: `Capability '${advertised.capabilityId}' vía satellite P2P`,
             inputSchema: undefined,
             providerId: peer.did,
             providerName: p.providerName || peer.did,
-            capabilityId,
+            capabilityId: advertised.capabilityId,
           });
         }
       }
@@ -187,4 +187,22 @@ function guessCapability(toolName: string): string {
     search_kb: "knowledge.query",
   };
   return mapping[toolName] ?? toolName;
+}
+
+export function advertisedTools(
+  tags: string[],
+  capabilityIds: string[],
+): Array<{ name: string; capabilityId: string }> {
+  const names = tags
+    .filter((tag) => tag.startsWith("tool:"))
+    .map((tag) => tag.slice("tool:".length).trim())
+    .filter(Boolean);
+  const candidates = names.length > 0 ? names : capabilityIds;
+
+  return candidates
+    .map((name) => ({
+      name,
+      capabilityId: capabilityIds.length === 1 ? capabilityIds[0] : guessCapability(name),
+    }))
+    .filter((tool) => capabilityIds.includes(tool.capabilityId));
 }
