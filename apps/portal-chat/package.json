@@ -1,6 +1,6 @@
 {
   "name": "@rafex/galaxia-portal-chat",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": false,
   "type": "module",
   "description": "Portal de chat web del cliente FHS v0.1 (Vite + vanilla TypeScript + HTML5 + CSS3). Separado del protocolo \u2014 ver apps/portal-tui para el cliente de terminal.",
