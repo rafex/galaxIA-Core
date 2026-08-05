@@ -33,7 +33,7 @@ COPY apps/atlas ./apps/atlas
 RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
       > apps/atlas/src/version.json
 
-RUN COMMIT_HASH="$COMMIT_HASH" BUILD_DATE="$BUILD_DATE" \
+RUN export COMMIT_HASH BUILD_DATE && \
     npm run build -w packages/fhs-node && \
     npm run build -w apps/atlas
 
