@@ -118,7 +118,6 @@ function envelopePayloadBytes(payload: FhsProto.Envelope["payload"]): Uint8Array
     assistantCompleted: FhsProto.AssistantCompletedMessageSchema,
     ocrExtracted: FhsProto.OcrExtractedMessageSchema,
     kbRecommended: FhsProto.KbRecommendedMessageSchema,
-    attachmentDecision: FhsProto.AttachmentDecisionMessageSchema,
     kbDecision: FhsProto.KbDecisionMessageSchema,
   } as const;
   const schema = schemas[payload.case];

@@ -38,7 +38,6 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     isStreaming: false,
     selectedModel: "auto",
     privacyScope: "community",
-    ocrMode: "auto",
     kbProviderId: "",
     kbMaxPerQuestion: 1,
     ipfsEnabled: false,
@@ -130,12 +129,6 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
             <option value="external">Proveedores externos autorizados</option>
           </select>
         </label>
-        <label data-tooltip="Qué hacer con el texto extraído de un documento adjunto antes de usarlo">
-          Documentos adjuntos:
-          <select class="ocr-mode-selector">
-            <option value="auto" selected>Uso automático con vista previa OCR</option>
-          </select>
-        </label>
         <label data-tooltip="Base de conocimiento a consultar para responder preguntas sobre un tema">
           Base de conocimiento:
           <select class="kb-selector">
@@ -189,7 +182,6 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   const clearHistoryBtn = container.querySelector(".clear-history-btn") as HTMLButtonElement;
   const modelSelector = container.querySelector(".model-selector") as HTMLSelectElement;
   const scopeSelector = container.querySelector(".scope-selector") as HTMLSelectElement;
-  const ocrModeSelector = container.querySelector(".ocr-mode-selector") as HTMLSelectElement;
   const kbSelector = container.querySelector(".kb-selector") as HTMLSelectElement;
   const kbMaxSelector = container.querySelector(".kb-max-selector") as HTMLSelectElement;
   const kbMaxWarning = container.querySelector(".kb-max-warning") as HTMLElement;
@@ -298,10 +290,6 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   scopeSelector.addEventListener("change", () => {
     state.privacyScope = scopeSelector.value as ChatState["privacyScope"];
-  });
-
-  ocrModeSelector.addEventListener("change", () => {
-    state.ocrMode = ocrModeSelector.value as ChatState["ocrMode"];
   });
 
   kbSelector.addEventListener("change", () => {
@@ -672,7 +660,6 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         model: state.selectedModel,
         scope: state.privacyScope,
         allowExternalProviders: state.privacyScope === "external",
-        ocrMode: state.ocrMode,
         kb: state.kbProviderId || undefined,
         kbMaxPerQuestion: state.kbMaxPerQuestion,
         ipfs: state.ipfsEnabled

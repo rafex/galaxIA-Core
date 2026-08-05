@@ -37,8 +37,7 @@ export interface ChatState {
   isStreaming: boolean;
   selectedModel: string;
   privacyScope: "local" | "network" | "community" | "external";
-  ocrMode: "confirm" | "auto";
-  /** "" = modo recomendado (matching determinístico + confirmación); un providerId = modo manual (SPEC-KB-0001) */
+  /** "" = modo recomendado; un providerId = modo manual (SPEC-KB-0001) */
   kbProviderId: string;
   /** SPEC-KB-0002 (DEC-0054) — cuántas KBs se consultan por pregunta cuando no hay selección manual. */
   kbMaxPerQuestion: number;

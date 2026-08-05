@@ -25,6 +25,7 @@ interface PendingKbRecommendation {
   message: { role: "user"; content: string };
   preferences: ModelPreferences;
   candidates: Array<{ providerId: string; providerName: string; description: string }>;
+  preExtractedText?: string;
 }
 
 export function registerPortalSession(
@@ -105,9 +106,14 @@ export function registerPortalSession(
       });
     };
 
-    const resolveKbAndChat = (id: string, message: { role: "user"; content: string }, currentPreferences: ModelPreferences) => {
+    const resolveKbAndChat = (
+      id: string,
+      message: { role: "user"; content: string },
+      currentPreferences: ModelPreferences,
+      preExtractedText?: string,
+    ) => {
       if (currentPreferences.kb) {
-        runChat(id, message, currentPreferences, undefined, undefined, [currentPreferences.kb]);
+        runChat(id, message, currentPreferences, preExtractedText, undefined, [currentPreferences.kb]);
         return;
       }
 
@@ -121,12 +127,12 @@ export function registerPortalSession(
       );
       void runtime.resolveKbCandidates(message.content, currentPreferences).then(({ candidates, chosenByLlm }) => {
         if (candidates.length === 0) {
-          runChat(id, message, currentPreferences);
+          runChat(id, message, currentPreferences, preExtractedText);
           return;
         }
-        pendingKbRecommendations.set(id, { message, preferences: currentPreferences, candidates });
+        pendingKbRecommendations.set(id, { message, preferences: currentPreferences, candidates, preExtractedText });
         eventBus.emit({ type: "kb.recommended", data: { conversationId: id, candidates, chosenByLlm } });
-      }).catch(() => runChat(id, message, currentPreferences));
+      }).catch(() => runChat(id, message, currentPreferences, preExtractedText));
     };
 
     try {
@@ -147,6 +153,7 @@ export function registerPortalSession(
             const conversationId = sessionId || request.missionId || crypto.randomUUID();
             sessionId = conversationId;
             const currentPreferences = { ...preferences, model: request.model || preferences.model };
+            const documentContext = request.documentContext?.text.trim() || undefined;
             let artifacts: string[];
             try {
               artifacts = await artifactRefsToDataUrls(request.artifacts);
@@ -176,7 +183,12 @@ export function registerPortalSession(
               }).catch((error: unknown) => sendError(stream, identity.did, remoteDid, conversationId, "RUNTIME_ERROR", error instanceof Error ? error.message : String(error)));
               break;
             }
-            resolveKbAndChat(conversationId, { role: "user", content: lastMessage.content }, currentPreferences);
+            resolveKbAndChat(
+              conversationId,
+              { role: "user", content: lastMessage.content },
+              currentPreferences,
+              documentContext,
+            );
             break;
           }
           case "kbDecision": {
@@ -184,7 +196,7 @@ export function registerPortalSession(
             const pending = pendingKbRecommendations.get(decision.missionId);
             if (!pending) break;
             pendingKbRecommendations.delete(decision.missionId);
-            runChat(decision.missionId, pending.message, pending.preferences, undefined, undefined, decision.use ? pending.candidates.map((candidate) => candidate.providerId) : undefined);
+            runChat(decision.missionId, pending.message, pending.preferences, pending.preExtractedText, undefined, decision.use ? pending.candidates.map((candidate) => candidate.providerId) : undefined);
             break;
           }
           case "chatCancel":
@@ -206,7 +218,6 @@ function preferencesFromStart(value: FhsProto.AgentStartMessage): ModelPreferenc
   return {
     model: value.model || undefined,
     scope: toPrivacyScope(value.scope),
-    ocrMode: value.ocrMode === "auto" ? "auto" : "confirm",
     kb: value.kb || undefined,
     kbMaxPerQuestion: value.kbMaxPerQuestion || undefined,
     ipfs: value.ipfsEnabled ? {

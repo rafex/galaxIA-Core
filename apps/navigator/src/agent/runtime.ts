@@ -41,13 +41,6 @@ export interface ModelPreferences {
   scope?: PrivacyScope;
   allowExternalProviders?: boolean;
   /**
-   * "confirm" (default): al adjuntar un archivo, se muestra el texto OCR y
-   * se espera confirmación del usuario antes de llamar al LLM (SPEC-OCRCONFIRM-0001).
-   * "auto": comportamiento original de DEC-0020 — OCR + respuesta del LLM en
-   * una sola llamada, sin pedir confirmación. Más rápido, menos control.
-   */
-  ocrMode?: "confirm" | "auto";
-  /**
    * "Kill" configurable de la espera de una Mission/Star (DEC-0010): cuánto
    * tiempo (ms) espera el Agent Server una respuesta antes de abandonar y
    * liberar la conversación, en vez del default fijo del stack (~300s). Es
@@ -144,7 +137,7 @@ export class AgentRuntime {
     // Adjuntar un archivo ya expresa la intención de OCR sin ambigüedad —
     // no depender de que el texto del mensaje también contenga palabras
     // clave como "ocr"/"texto"/"imagen" (ver DEC-0020). Si el texto ya viene
-    // pre-extraído (flujo de confirmación, ver SPEC-OCRCONFIRM-0001), no hace
+    // pre-extraído (DocumentContext de una pregunta anterior), no hace
     // falta resolver el provider de OCR de nuevo.
     if (this.artifacts.length > 0 && !capabilities.includes("document.ocr")) {
       capabilities.push("document.ocr");
@@ -188,7 +181,7 @@ export class AgentRuntime {
       // No hay archivo real en este turno (ya se extrajo antes) — si se deja
       // la tool disponible, el LLM puede igual decidir invocarla sin adjunto
       // y fallar (ver bug encontrado en la demo multi-host: el modelo llamaba
-      // ocr_extract sobre un /tmp/ocr.png inexistente tras confirmar el uso).
+      // ocr_extract sobre un /tmp/ocr.png inexistente tras reutilizar el contexto).
       for (let i = loadedTools.length - 1; i >= 0; i--) {
         if (loadedTools[i].capabilityId === "document.ocr") {
           loadedTools.splice(i, 1);

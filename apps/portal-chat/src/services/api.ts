@@ -18,7 +18,7 @@ export interface ApiOptions {
   message: string;
   artifacts?: string[];
   attachmentName?: string;
-  /** Contexto OCR efímero del chat; viaja dentro del mensaje protobuf. */
+  /** Contexto OCR efímero del chat; viaja como DocumentContext Protobuf. */
   documentContext?: {
     filename: string;
     text: string;
@@ -27,7 +27,6 @@ export interface ApiOptions {
     model?: string;
     scope?: "local" | "network" | "community" | "external";
     allowExternalProviders?: boolean;
-    ocrMode?: "confirm" | "auto";
     kb?: string;
     kbMaxPerQuestion?: number;
     ipfs?: {
@@ -40,7 +39,6 @@ export interface ApiOptions {
 
 export interface ChatConnection {
   send(options: ApiOptions): void;
-  sendDecision(conversationId: string, use: boolean): void;
   sendKbDecision(conversationId: string, use: boolean): void;
   reconnect(): void;
   close(): void;
@@ -243,7 +241,6 @@ export function connectToChat(
           sessionId,
           scope: preferences.scope ?? "community",
           model: preferences.model ?? "",
-          ocrMode: preferences.ocrMode ?? "auto",
           kb: preferences.kb ?? "",
           kbMaxPerQuestion: preferences.kbMaxPerQuestion ?? 1,
           ipfsEnabled: preferences.ipfs?.enabled ?? false,
@@ -260,18 +257,18 @@ export function connectToChat(
 
   async function sendChatRequest(options: ApiOptions): Promise<void> {
     if (!stream || !privateKey) return;
-    const message = options.documentContext?.text.trim()
-      ? `${options.message}\n\n[Contexto temporal del documento: ${options.documentContext.filename}]\n${options.documentContext.text}`
-      : options.message;
     await sendEnvelope(stream, newEnvelope({
       sourcePeerId,
       payload: {
         case: "chatRequest",
         value: create(FhsProto.ChatRequestMessageSchema, {
           missionId: sessionId,
-          messages: [create(FhsProto.MessageSchema, { role: "user", content: message })],
+          messages: [create(FhsProto.MessageSchema, { role: "user", content: options.message })],
           model: options.preferences?.model ?? "",
           artifacts: toInlineArtifacts(options.artifacts, options.attachmentName),
+          documentContext: options.documentContext
+            ? create(FhsProto.DocumentContextSchema, options.documentContext)
+            : undefined,
         }),
       },
     }), privateKey);
@@ -279,9 +276,6 @@ export function connectToChat(
 
   return {
     send,
-    sendDecision: (conversationId: string, use: boolean) => {
-      void sendControlEnvelope({ case: "attachmentDecision", value: create(FhsProto.AttachmentDecisionMessageSchema, { missionId: conversationId, use }) });
-    },
     sendKbDecision: (conversationId: string, use: boolean) => {
       void sendControlEnvelope({ case: "kbDecision", value: create(FhsProto.KbDecisionMessageSchema, { missionId: conversationId, use }) });
     },
@@ -391,7 +385,6 @@ function encodePayload(payload: FhsProto.Envelope["payload"]): Uint8Array {
     assistantCompleted: FhsProto.AssistantCompletedMessageSchema,
     ocrExtracted: FhsProto.OcrExtractedMessageSchema,
     kbRecommended: FhsProto.KbRecommendedMessageSchema,
-    attachmentDecision: FhsProto.AttachmentDecisionMessageSchema,
     kbDecision: FhsProto.KbDecisionMessageSchema,
     error: FhsProto.ErrorMessageSchema,
     ping: FhsProto.PingMessageSchema,

@@ -22,8 +22,8 @@
     "node": ">=20.0.0"
   },
   "devDependencies": {
+    "@rafex/galaxia-fhs-protocol": "npm:@rafex_labs/galaxia-fhs-protocol@^0.1.35",
     "@types/ws": "8.18.1",
-    "@rafex/galaxia-fhs-protocol": "npm:@rafex_labs/galaxia-fhs-protocol@^0.1.33",
     "@typescript-eslint/eslint-plugin": "8.63.0",
     "@typescript-eslint/parser": "8.63.0",
     "eslint": "10.6.0",
