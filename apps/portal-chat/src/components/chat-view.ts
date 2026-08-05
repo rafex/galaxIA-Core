@@ -1,5 +1,11 @@
 import type { AgentEvent, ChatConversation, ChatMessage, ChatState, KbCitation, ProvenanceInfo } from "../types/fhs.js";
-import { connectToChat, type ApiOptions, type ChatConnection, type ChatConnectionStatus } from "../services/api.js";
+import {
+  connectToChat,
+  type ApiOptions,
+  type ChatConnection,
+  type ChatConnectionStatus,
+  type ChatConnectionStatusInfo,
+} from "../services/api.js";
 import {
   createChatHistory,
   createConversation,
@@ -809,9 +815,11 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   let thinkingEl: HTMLElement | null = null;
 
-  function updateConnectionStatus(status: ChatConnectionStatus) {
+  function updateConnectionStatus(status: ChatConnectionStatus, info?: ChatConnectionStatusInfo) {
     const labels: Record<ChatConnectionStatus, string> = {
-      connecting: "Conectando…",
+      connecting: info?.retryInMs
+        ? `Reintentando en ${formatDuration(info.retryInMs)}…`
+        : "Conectando…",
       connected: "Conectado",
       disconnected: "Desconectado",
     };
@@ -820,6 +828,9 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     reconnectBtn.hidden = status === "connected";
     reconnectBtn.disabled = status === "connecting";
     reconnectBtn.title = status === "connecting" ? "Conectando con la red P2P…" : "Reconectar este chat a la red P2P";
+    if (status === "connecting" && info?.automatic && state.isStreaming) {
+      showThinking(`Reconectando con la red FHS… (intento ${info.attempt})`);
+    }
   }
 
   function startResponseTimer() {

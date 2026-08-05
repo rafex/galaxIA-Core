@@ -43,12 +43,24 @@ export interface ChatConnection {
 
 export type ChatConnectionStatus = "connecting" | "connected" | "disconnected";
 
+export interface ChatConnectionStatusInfo {
+  automatic: boolean;
+  attempt: number;
+  retryInMs?: number;
+  message?: string;
+  exhausted?: boolean;
+}
+
+const MAX_AUTOMATIC_RECONNECT_ATTEMPTS = 5;
+const AUTOMATIC_RECONNECT_BASE_DELAY_MS = 1_000;
+const AUTOMATIC_RECONNECT_MAX_DELAY_MS = 15_000;
+
 type P2pPrivateKey = Awaited<ReturnType<typeof generateKeyPair>>;
 
 export function connectToChat(
   onEvent: (event: AgentEvent) => void,
   onOpen?: () => void,
-  onStatus?: (status: ChatConnectionStatus) => void,
+  onStatus?: (status: ChatConnectionStatus, info?: ChatConnectionStatusInfo) => void,
 ): ChatConnection {
   let node: PortalP2pNode | undefined;
   let stream: P2pStream | undefined;
@@ -59,14 +71,18 @@ export function connectToChat(
   let privateKey: P2pPrivateKey | undefined;
   let sourcePeerId = "";
   let opening = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let reconnectAttempt = 0;
+  let connectionGeneration = 0;
 
   void openSession();
 
   async function openSession(): Promise<void> {
     if (opening || closedByCaller) return;
     opening = true;
+    const generation = ++connectionGeneration;
     ready = false;
-    onStatus?.("connecting");
+    onStatus?.("connecting", { automatic: reconnectAttempt > 0, attempt: reconnectAttempt });
     const previousNode = node;
     node = undefined;
     stream = undefined;
@@ -80,14 +96,16 @@ export function connectToChat(
         typeof localStorage === "undefined" ? undefined : localStorage,
       );
     } catch (error) {
-      onEvent({ type: "error", data: { code: "P2P_CONFIG", message: error instanceof Error ? error.message : String(error) } });
-      onStatus?.("disconnected");
+      const message = error instanceof Error ? error.message : String(error);
+      onStatus?.("disconnected", { automatic: false, attempt: reconnectAttempt, message, exhausted: true });
+      onEvent({ type: "error", data: { code: "P2P_CONFIG", message } });
       opening = false;
       return;
     }
     if (bootstrapAddrs.length === 0) {
-      onEvent({ type: "error", data: { code: "P2P_CONFIG", message: "Falta FHS_BOOTSTRAP_ADDRS o fhs.bootstrap-addrs" } });
-      onStatus?.("disconnected");
+      const message = "Falta FHS_BOOTSTRAP_ADDRS o fhs.bootstrap-addrs";
+      onStatus?.("disconnected", { automatic: false, attempt: reconnectAttempt, message, exhausted: true });
+      onEvent({ type: "error", data: { code: "P2P_CONFIG", message } });
       opening = false;
       return;
     }
@@ -101,7 +119,7 @@ export function connectToChat(
       stream = openedStream;
 
       await sendEnvelope(openedStream, makeHandshake(privateKey.publicKey.raw), privateKey);
-      void readFrames(privateKey.publicKey.raw);
+      void readFrames(openedStream, privateKey.publicKey.raw, generation);
     } catch (error) {
       const failedNode = node;
       node = undefined;
@@ -109,18 +127,16 @@ export function connectToChat(
       privateKey = undefined;
       sourcePeerId = "";
       await failedNode?.stop().catch(() => undefined);
-      onEvent({ type: "error", data: { code: "P2P_CONNECT", message: error instanceof Error ? error.message : String(error) } });
-      onStatus?.("disconnected");
+      handleTransportFailure("P2P_CONNECT", error instanceof Error ? error.message : String(error));
     } finally {
       opening = false;
     }
   }
 
-  async function readFrames(publicKey: Uint8Array): Promise<void> {
-    if (!stream) return;
+  async function readFrames(streamToRead: P2pStream, publicKey: Uint8Array, generation: number): Promise<void> {
     let buffer = new Uint8Array();
     try {
-      for await (const chunk of stream) {
+      for await (const chunk of streamToRead) {
         const bytes = chunk instanceof Uint8Array ? chunk : (chunk as { subarray(): Uint8Array }).subarray();
         const joined = new Uint8Array(buffer.byteLength + bytes.byteLength);
         joined.set(buffer);
@@ -132,32 +148,29 @@ export function connectToChat(
             const decoded = decodeEnvelopeFrame(buffer);
             buffer = buffer.slice(decoded.bytesConsumed);
             if (!await verifyEnvelope(decoded.envelope, publicKey)) continue;
-            handleEnvelope(decoded.envelope);
+            handleEnvelope(decoded.envelope, generation);
           } catch (error) {
             if (error instanceof Error && error.message.includes("incompleto")) break;
             throw error;
           }
         }
       }
-      if (!closedByCaller) {
-        ready = false;
-        onStatus?.("disconnected");
-        onEvent({ type: "error", data: { code: "P2P_CLOSED", message: "Sesión libp2p cerrada" } });
-      }
+      if (!closedByCaller && generation === connectionGeneration) handleTransportFailure("P2P_CLOSED", "Sesión libp2p cerrada");
     } catch (error) {
-      if (!closedByCaller) {
-        ready = false;
-        onStatus?.("disconnected");
-        onEvent({ type: "error", data: { code: "P2P_STREAM", message: error instanceof Error ? error.message : String(error) } });
+      if (!closedByCaller && generation === connectionGeneration) {
+        handleTransportFailure("P2P_STREAM", error instanceof Error ? error.message : String(error));
       }
     }
   }
 
-  function handleEnvelope(envelope: FhsProto.Envelope): void {
+  function handleEnvelope(envelope: FhsProto.Envelope, generation: number): void {
+    if (generation !== connectionGeneration) return;
     switch (envelope.payload.case) {
       case "handshakeAck":
         ready = true;
-        onStatus?.("connected");
+        reconnectAttempt = 0;
+        clearReconnectTimer();
+        onStatus?.("connected", { automatic: false, attempt: 0 });
         if (pending) {
           const next = pending;
           pending = null;
@@ -209,6 +222,7 @@ export function connectToChat(
   function send(options: ApiOptions): void {
     if (!ready) {
       pending = options;
+      clearReconnectTimer();
       void openSession();
       return;
     }
@@ -265,6 +279,8 @@ export function connectToChat(
     },
     reconnect: () => {
       if (closedByCaller) closedByCaller = false;
+      clearReconnectTimer();
+      reconnectAttempt = 0;
       ready = false;
       const activeNode = node;
       node = undefined;
@@ -276,11 +292,41 @@ export function connectToChat(
     },
     close: () => {
       closedByCaller = true;
+      clearReconnectTimer();
       ready = false;
       onStatus?.("disconnected");
       void node?.stop();
     },
   };
+
+  function clearReconnectTimer(): void {
+    if (reconnectTimer !== undefined) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+    }
+  }
+
+  function handleTransportFailure(code: string, message: string): void {
+    if (closedByCaller || reconnectTimer !== undefined) return;
+    ready = false;
+    const attempt = reconnectAttempt + 1;
+    if (attempt <= MAX_AUTOMATIC_RECONNECT_ATTEMPTS) {
+      reconnectAttempt = attempt;
+      const retryInMs = Math.min(
+        AUTOMATIC_RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1),
+        AUTOMATIC_RECONNECT_MAX_DELAY_MS,
+      );
+      onStatus?.("connecting", { automatic: true, attempt, retryInMs, message });
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        void openSession();
+      }, retryInMs);
+      return;
+    }
+
+    onStatus?.("disconnected", { automatic: true, attempt, message, exhausted: true });
+    onEvent({ type: "error", data: { code, message } });
+  }
 
   async function sendControlEnvelope(payload: FhsProto.Envelope["payload"]): Promise<void> {
     if (!stream || !privateKey || !ready) return;
