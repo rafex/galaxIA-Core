@@ -70,6 +70,10 @@ services:
       - PORTAL_CERT_CN=${PORTAL_CERT_CN:-localhost}
       - PORTAL_CERT_SAN=${PORTAL_CERT_SAN:-DNS:localhost,IP:127.0.0.1}
       - FHS_BOOTSTRAP_ADDRS=${FHS_BOOTSTRAP_ADDRS:-}
+    # Persist the browser-facing certificate across container recreation.
+    # Otherwise every redeploy invalidates the Firefox security exception.
+    volumes:
+      - ${PORTAL_CERTS_DIR:-../certs/portal-chat}:/etc/nginx/certs
     depends_on:
       - navigator
       - atlas

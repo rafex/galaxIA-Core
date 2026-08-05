@@ -15,12 +15,11 @@
 # variables ajustar en cada máquina de la topología multi-host.
 #
 # CERTS_DIR: ruta absoluta a la carpeta con dev.crt/dev.key, EN EL HOST QUE
-# REALMENTE EJECUTA EL CONTENEDOR — no en la máquina desde la que se corre
-# `podman-compose`. Si se administra el bastion vía conexión remota de podman
-# (sin un checkout del repo ahí), la ruta relativa por defecto (../certs) no
-# existe en ese host y el bind-mount falla. Copiar los certs al bastion
-# (ej. scp a ~/certs) y exportar CERTS_DIR=/home/<usuario>/certs antes de
-# levantar los servicios que corren ahí.
+# REALMENTE EJECUTA Atlas/Navigator. PORTAL_CERTS_DIR es una carpeta separada
+# que contiene portal.crt/portal.key y debe ser persistente para no invalidar
+# la excepción de seguridad del navegador en cada recreación del contenedor.
+# Si se administra el bastion vía conexión remota de podman, usar rutas
+# absolutas en ambas variables.
 
 services:
   navigator:
@@ -38,4 +37,4 @@ services:
     ports:
       - "8443:443"
     volumes:
-      - ${CERTS_DIR:-../certs}:/etc/nginx/certs:ro
+      - ${PORTAL_CERTS_DIR:-../certs/portal-chat}:/etc/nginx/certs:ro
