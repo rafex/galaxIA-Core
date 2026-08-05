@@ -1,5 +1,5 @@
 import type { AgentEvent, ChatConversation, ChatMessage, ChatState, KbCitation, ProvenanceInfo } from "../types/fhs.js";
-import { connectToChat, type ChatConnection } from "../services/api.js";
+import { connectToChat, type ApiOptions, type ChatConnection, type ChatConnectionStatus } from "../services/api.js";
 import {
   createChatHistory,
   createConversation,
@@ -43,6 +43,8 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   let responseMessageId: string | null = null;
   let pendingMessageId: string | null = null;
   let chatConnection: ChatConnection | null = null;
+  let queuedSendOptions: ApiOptions | null = null;
+  let responseTimer: number | null = null;
   let pendingAttachment: string | null = null;
   let pendingAttachmentIsPdf = false;
   let pendingAttachmentName: string | null = null;
@@ -63,7 +65,9 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         <div class="network-status" data-tooltip="Estado de la conexión con la red comunitaria FHS">
           <span class="status-dot"></span>
           <span>Red: FARO</span>
+          <span class="connection-label">Desconectado</span>
           <span class="version">${version}</span>
+          <button class="reconnect-btn" type="button" data-tooltip="Reconectar este chat a la red P2P">↻ Reconectar</button>
         </div>
         <button type="button" class="icon-btn drawer-trigger" data-drawer-trigger="activity"
           aria-label="Actividad del agente" data-tooltip="Ver qué está haciendo el agente y de dónde viene la respuesta">📊</button>
@@ -193,6 +197,9 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   const settingsBarEl = container.querySelector(".settings-bar") as HTMLElement;
   const themeToggleBtn = container.querySelector(".theme-toggle") as HTMLButtonElement;
   const tourTriggerBtn = container.querySelector(".tour-trigger") as HTMLButtonElement;
+  const statusDotEl = container.querySelector(".status-dot") as HTMLElement;
+  const connectionLabelEl = container.querySelector(".connection-label") as HTMLElement;
+  const reconnectBtn = container.querySelector(".reconnect-btn") as HTMLButtonElement;
 
   initializeHistory();
   initTooltips(container);
@@ -265,6 +272,15 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   }
 
   configureIpfsSettings();
+  updateConnectionStatus("disconnected");
+
+  reconnectBtn.addEventListener("click", () => {
+    if (chatConnection) {
+      chatConnection.reconnect();
+    } else {
+      createChatConnection();
+    }
+  });
 
   modelSelector.addEventListener("change", () => {
     state.selectedModel = modelSelector.value;
@@ -373,6 +389,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     responseStartedAt = null;
     responseMessageId = null;
     pendingMessageId = null;
+    queuedSendOptions = null;
     resetPromptHistoryNavigation();
     state.messages = [];
     state.isStreaming = false;
@@ -395,6 +412,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     responseStartedAt = null;
     responseMessageId = null;
     pendingMessageId = null;
+    queuedSendOptions = null;
     resetPromptHistoryNavigation();
     state.messages = [...selected.messages];
     activityLogEl.innerHTML = "";
@@ -623,7 +641,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     state.isStreaming = true;
     sendBtn.disabled = true;
     activityLogEl.innerHTML = "";
-    hideThinking();
+    showThinking("Conectando con la red FHS…");
     persistActiveConversation();
 
     const sendOptions = {
@@ -645,10 +663,20 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     };
 
     if (!chatConnection) {
-      chatConnection = connectToChat(handleEvent, () => chatConnection?.send(sendOptions));
+      queuedSendOptions = sendOptions;
+      createChatConnection();
     } else {
       chatConnection.send(sendOptions);
     }
+  }
+
+  function createChatConnection() {
+    chatConnection = connectToChat(handleEvent, () => {
+      if (!queuedSendOptions || !pendingMessageId || !state.isStreaming) return;
+      const next = queuedSendOptions;
+      queuedSendOptions = null;
+      chatConnection?.send(next);
+    }, updateConnectionStatus);
   }
 
   function retryMessage(messageId: string) {
@@ -744,6 +772,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       case "error":
         hideThinking();
         addActivityItem("error", `[${event.data.code}] ${event.data.message}`);
+        queuedSendOptions = null;
         markPendingMessageFailed(event.data.message);
         persistActiveConversation();
         responseStartedAt = null;
@@ -780,6 +809,37 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   let thinkingEl: HTMLElement | null = null;
 
+  function updateConnectionStatus(status: ChatConnectionStatus) {
+    const labels: Record<ChatConnectionStatus, string> = {
+      connecting: "Conectando…",
+      connected: "Conectado",
+      disconnected: "Desconectado",
+    };
+    statusDotEl.dataset.status = status;
+    connectionLabelEl.textContent = labels[status];
+    reconnectBtn.hidden = status === "connected";
+    reconnectBtn.disabled = status === "connecting";
+    reconnectBtn.title = status === "connecting" ? "Conectando con la red P2P…" : "Reconectar este chat a la red P2P";
+  }
+
+  function startResponseTimer() {
+    if (responseTimer != null) window.clearInterval(responseTimer);
+    const tick = () => {
+      if (!thinkingEl || responseStartedAt == null) return;
+      const timer = thinkingEl.querySelector(".thinking-timer");
+      if (timer) timer.textContent = formatDuration(Date.now() - responseStartedAt);
+    };
+    tick();
+    responseTimer = window.setInterval(tick, 100);
+  }
+
+  function stopResponseTimer() {
+    if (responseTimer != null) {
+      window.clearInterval(responseTimer);
+      responseTimer = null;
+    }
+  }
+
   function showThinking(statusText: string) {
     if (!thinkingEl) {
       thinkingEl = document.createElement("div");
@@ -789,16 +849,22 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       dots.innerHTML = "<i></i><i></i><i></i>";
       const label = document.createElement("span");
       label.className = "thinking-label";
+      const timer = document.createElement("span");
+      timer.className = "thinking-timer";
+      timer.setAttribute("aria-label", "Tiempo transcurrido");
       thinkingEl.appendChild(dots);
       thinkingEl.appendChild(label);
+      thinkingEl.appendChild(timer);
       messagesEl.appendChild(thinkingEl);
     }
     const label = thinkingEl.querySelector(".thinking-label");
     if (label) label.textContent = statusText;
+    startResponseTimer();
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
   function hideThinking() {
+    stopResponseTimer();
     thinkingEl?.remove();
     thinkingEl = null;
   }

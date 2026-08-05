@@ -37,14 +37,18 @@ export interface ChatConnection {
   send(options: ApiOptions): void;
   sendDecision(conversationId: string, use: boolean): void;
   sendKbDecision(conversationId: string, use: boolean): void;
+  reconnect(): void;
   close(): void;
 }
+
+export type ChatConnectionStatus = "connecting" | "connected" | "disconnected";
 
 type P2pPrivateKey = Awaited<ReturnType<typeof generateKeyPair>>;
 
 export function connectToChat(
   onEvent: (event: AgentEvent) => void,
   onOpen?: () => void,
+  onStatus?: (status: ChatConnectionStatus) => void,
 ): ChatConnection {
   let node: PortalP2pNode | undefined;
   let stream: P2pStream | undefined;
@@ -54,10 +58,21 @@ export function connectToChat(
   let ready = false;
   let privateKey: P2pPrivateKey | undefined;
   let sourcePeerId = "";
+  let opening = false;
 
   void openSession();
 
   async function openSession(): Promise<void> {
+    if (opening || closedByCaller) return;
+    opening = true;
+    ready = false;
+    onStatus?.("connecting");
+    const previousNode = node;
+    node = undefined;
+    stream = undefined;
+    privateKey = undefined;
+    sourcePeerId = "";
+    await previousNode?.stop().catch(() => undefined);
     let bootstrapAddrs: string[];
     try {
       bootstrapAddrs = await loadBootstrapAddresses(
@@ -66,10 +81,14 @@ export function connectToChat(
       );
     } catch (error) {
       onEvent({ type: "error", data: { code: "P2P_CONFIG", message: error instanceof Error ? error.message : String(error) } });
+      onStatus?.("disconnected");
+      opening = false;
       return;
     }
     if (bootstrapAddrs.length === 0) {
       onEvent({ type: "error", data: { code: "P2P_CONFIG", message: "Falta FHS_BOOTSTRAP_ADDRS o fhs.bootstrap-addrs" } });
+      onStatus?.("disconnected");
+      opening = false;
       return;
     }
 
@@ -84,7 +103,16 @@ export function connectToChat(
       await sendEnvelope(openedStream, makeHandshake(privateKey.publicKey.raw), privateKey);
       void readFrames(privateKey.publicKey.raw);
     } catch (error) {
+      const failedNode = node;
+      node = undefined;
+      stream = undefined;
+      privateKey = undefined;
+      sourcePeerId = "";
+      await failedNode?.stop().catch(() => undefined);
       onEvent({ type: "error", data: { code: "P2P_CONNECT", message: error instanceof Error ? error.message : String(error) } });
+      onStatus?.("disconnected");
+    } finally {
+      opening = false;
     }
   }
 
@@ -111,9 +139,17 @@ export function connectToChat(
           }
         }
       }
-      if (!closedByCaller) onEvent({ type: "error", data: { code: "P2P_CLOSED", message: "Sesión libp2p cerrada" } });
+      if (!closedByCaller) {
+        ready = false;
+        onStatus?.("disconnected");
+        onEvent({ type: "error", data: { code: "P2P_CLOSED", message: "Sesión libp2p cerrada" } });
+      }
     } catch (error) {
-      if (!closedByCaller) onEvent({ type: "error", data: { code: "P2P_STREAM", message: error instanceof Error ? error.message : String(error) } });
+      if (!closedByCaller) {
+        ready = false;
+        onStatus?.("disconnected");
+        onEvent({ type: "error", data: { code: "P2P_STREAM", message: error instanceof Error ? error.message : String(error) } });
+      }
     }
   }
 
@@ -121,6 +157,7 @@ export function connectToChat(
     switch (envelope.payload.case) {
       case "handshakeAck":
         ready = true;
+        onStatus?.("connected");
         if (pending) {
           const next = pending;
           pending = null;
@@ -172,6 +209,7 @@ export function connectToChat(
   function send(options: ApiOptions): void {
     if (!ready) {
       pending = options;
+      void openSession();
       return;
     }
     const preferences = options.preferences ?? {};
@@ -225,9 +263,21 @@ export function connectToChat(
     sendKbDecision: (conversationId: string, use: boolean) => {
       void sendControlEnvelope({ case: "kbDecision", value: create(FhsProto.KbDecisionMessageSchema, { missionId: conversationId, use }) });
     },
+    reconnect: () => {
+      if (closedByCaller) closedByCaller = false;
+      ready = false;
+      const activeNode = node;
+      node = undefined;
+      stream = undefined;
+      privateKey = undefined;
+      sourcePeerId = "";
+      void activeNode?.stop().catch(() => undefined);
+      void openSession();
+    },
     close: () => {
       closedByCaller = true;
       ready = false;
+      onStatus?.("disconnected");
       void node?.stop();
     },
   };
