@@ -78,7 +78,7 @@ describe("portal P2P discovery", () => {
     await expect(decodeSignedNodeAdvertise(encodeMessage(FhsProto.NodeAdvertiseMessageSchema, tampered))).resolves.toBeNull();
   });
 
-  it("subscribes before dialing the bootstrap and then pins the discovered peer", async () => {
+  it("dials all bootstraps and Navigator addresses concurrently", async () => {
     const privateKey = await generateKeyPair("Ed25519");
     const rawPublicKey = privateKey.publicKey.raw;
     const did = `did:key:${base58btc.encode(Uint8Array.from([0xed, 0x01, ...rawPublicKey]))}`;
@@ -97,7 +97,10 @@ describe("portal P2P discovery", () => {
     const advertise = encodeMessage(FhsProto.NodeAdvertiseMessageSchema, create(FhsProto.NodeAdvertiseMessageSchema, {
       did,
       beacon,
-      multiaddrs: ["/ip4/192.168.3.175/tcp/4010/tls/ws"],
+      multiaddrs: [
+        "/ip4/192.168.3.175/tcp/4010/tls/ws",
+        "/ip4/192.168.3.175/tcp/4011/tls/ws",
+      ],
       timestamp: BigInt(timestamp),
       ttlSeconds,
       trustLevel: "community",
@@ -106,6 +109,7 @@ describe("portal P2P discovery", () => {
 
     let onMessage: ((event: { detail?: { topic?: string; data?: Uint8Array } }) => void) | undefined;
     const dialed: string[] = [];
+    let advertised = false;
     const node = {
       services: {
         pubsub: {
@@ -119,16 +123,31 @@ describe("portal P2P discovery", () => {
         },
       },
       dial: async (address: { toString(): string }) => {
-        dialed.push(address.toString());
-        if (dialed.length === 1) onMessage?.({ detail: { topic: TOPIC_NODES_ADVERTISE, data: advertise } });
+        const value = address.toString();
+        dialed.push(value);
+        if (!value.includes("/p2p/")) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          if (!advertised && dialed.filter((item) => !item.includes("/p2p/")).length === 2) {
+            advertised = true;
+            onMessage?.({ detail: { topic: TOPIC_NODES_ADVERTISE, data: advertise } });
+          }
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, value.includes("/tcp/4010/") ? 10 : 0));
+        }
         return { newStream: async () => ({ send: () => {}, [Symbol.asyncIterator]: async function* () {} }) };
       },
       stop: async () => {},
     };
 
-    const result = await discoverNavigator(node, ["/ip4/192.168.3.175/tcp/4001/tls/ws"], 1_000);
-    expect(dialed[0]).toBe("/ip4/192.168.3.175/tcp/4001/tls/ws");
-    expect(dialed[1]).toContain("/p2p/");
+    const result = await discoverNavigator(node, [
+      "/ip4/192.168.3.175/tcp/4001/tls/ws",
+      "/ip4/192.168.3.175/tcp/4002/tls/ws",
+    ], 1_000);
+    expect(dialed.slice(0, 2)).toEqual([
+      "/ip4/192.168.3.175/tcp/4001/tls/ws",
+      "/ip4/192.168.3.175/tcp/4002/tls/ws",
+    ]);
+    expect(dialed.filter((item) => item.includes("/p2p/")).length).toBe(2);
     expect(result.did).toBe(did);
   });
 });

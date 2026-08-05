@@ -26,6 +26,7 @@ export interface P2pStream extends AsyncIterable<unknown> {
 
 export interface P2pConnection {
   newStream(protocol: string): Promise<P2pStream>;
+  close?: () => Promise<void> | void;
 }
 
 interface PubsubMessageEvent {
@@ -127,16 +128,20 @@ export async function discoverNavigator(
       const beacon = await readDhtBeacon(node, advertise.did);
       const addresses = beacon?.multiaddrs.length ? beacon.multiaddrs : advertise.multiaddrs;
       const peerId = peerIdFromDid(advertise.did);
-      for (const rawAddress of addresses) {
-        const dialAddress = withPeerId(rawAddress, peerId);
+      await Promise.all(addresses.map(async (rawAddress) => {
+        let dialAddress: string;
         try {
+          dialAddress = withPeerId(rawAddress, peerId);
           const connection = await node.dial(multiaddr(dialAddress));
+          if (settled) {
+            await connection.close?.();
+            return;
+          }
           finish(undefined, { connection, did: advertise.did, multiaddr: dialAddress });
-          return;
         } catch {
-          // Try the next signed/derived address before declaring discovery failed.
+          // All signed/derived addresses are dialed concurrently.
         }
-      }
+      }));
     };
 
     pubsub.addEventListener("message", onMessage);
@@ -147,15 +152,30 @@ export async function discoverNavigator(
 
     async function connectBootstraps(): Promise<void> {
       const errors: string[] = [];
-      for (const address of bootstrapAddresses) {
-        try {
-          await node.dial(multiaddr(address));
+      let pending = bootstrapAddresses.length;
+      let connected = false;
+
+      await new Promise<void>((resolve, reject) => {
+        if (pending === 0) {
+          reject(new Error("No hay direcciones bootstrap configuradas"));
           return;
-        } catch (error) {
-          errors.push(`${address}: ${error instanceof Error ? error.message : String(error)}`);
         }
-      }
-      throw new Error(errors.join(" | "));
+
+        for (const address of bootstrapAddresses) {
+          void node.dial(multiaddr(address)).then(() => {
+            // Keep every successful bootstrap connection in the libp2p swarm;
+            // resolve discovery as soon as the first one is ready.
+            if (!connected) {
+              connected = true;
+              resolve();
+            }
+          }).catch((error: unknown) => {
+            errors.push(`${address}: ${error instanceof Error ? error.message : String(error)}`);
+            pending -= 1;
+            if (pending === 0 && !connected) reject(new Error(errors.join(" | ")));
+          });
+        }
+      });
     }
   });
 }

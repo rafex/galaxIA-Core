@@ -36,4 +36,10 @@ describe("portal bootstrap discovery", () => {
     const fetcher = async () => new Response(JSON.stringify({ bootstrapAddrs: `${transportAddress}/p2p/rotated-peer-id` }), { status: 200 });
     await expect(loadBootstrapAddresses([], undefined, fetcher)).resolves.toEqual([transportAddress]);
   });
+
+  it("accepts a runtime list of bootstrap addresses", async () => {
+    const secondAddress = "/ip4/192.168.1.136/tcp/4001/tls/ws";
+    const fetcher = async () => new Response(JSON.stringify({ bootstrapAddrs: [transportAddress, secondAddress] }), { status: 200 });
+    await expect(loadBootstrapAddresses([], undefined, fetcher)).resolves.toEqual([transportAddress, secondAddress]);
+  });
 });

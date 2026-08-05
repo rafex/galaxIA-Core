@@ -8,6 +8,8 @@ import { WebSocketsSecure } from "@multiformats/multiaddr-matcher";
  */
 export const FHS_BOOTSTRAP_STORAGE_KEY = "fhs.bootstrap-addrs";
 
+type BootstrapSource = string | readonly string[] | undefined;
+
 const TRAILING_P2P_COMPONENT = /\/p2p\/[^/]+$/;
 
 export function normalizeBootstrapAddress(rawAddress: string): string {
@@ -28,19 +30,22 @@ export function normalizeBootstrapAddress(rawAddress: string): string {
   return address.decapsulateCode(CODE_P2P).toString();
 }
 
-export function parseBootstrapAddresses(rawValues: Array<string | undefined>): string[] {
+export function parseBootstrapAddresses(rawValues: BootstrapSource[]): string[] {
   const addresses = new Set<string>();
   for (const rawValue of rawValues) {
-    for (const rawAddress of (rawValue ?? "").split(/[\n,]+/)) {
-      if (!rawAddress.trim()) continue;
-      addresses.add(normalizeBootstrapAddress(rawAddress));
+    const values: readonly string[] = typeof rawValue === "string" ? [rawValue] : rawValue ?? [""];
+    for (const value of values) {
+      for (const rawAddress of value.split(/[\n,]+/)) {
+        if (!rawAddress.trim()) continue;
+        addresses.add(normalizeBootstrapAddress(rawAddress));
+      }
     }
   }
   return [...addresses];
 }
 
 export function resolveBootstrapAddresses(
-  envValues: Array<string | undefined>,
+  envValues: BootstrapSource[],
   storage?: Pick<Storage, "getItem">,
 ): string[] {
   const storedValue = storage?.getItem(FHS_BOOTSTRAP_STORAGE_KEY) ?? undefined;
@@ -48,11 +53,11 @@ export function resolveBootstrapAddresses(
 }
 
 export async function loadBootstrapAddresses(
-  envValues: Array<string | undefined>,
+  envValues: BootstrapSource[],
   storage: Pick<Storage, "getItem"> | undefined,
   fetcher: typeof fetch = fetch,
 ): Promise<string[]> {
-  let runtimeValue: string | undefined;
+  let runtimeValue: BootstrapSource;
   let response: Response | undefined;
   try {
     response = await fetcher(`/p2p-config.json?ts=${Date.now()}`, { cache: "no-store" });
@@ -69,8 +74,12 @@ export async function loadBootstrapAddresses(
     } catch {
       throw new Error("p2p-config.json no contiene JSON válido");
     }
-    if (config.bootstrapAddrs !== undefined && typeof config.bootstrapAddrs !== "string") {
-      throw new Error("p2p-config.json.bootstrapAddrs debe ser texto");
+    if (
+      config.bootstrapAddrs !== undefined &&
+      typeof config.bootstrapAddrs !== "string" &&
+      (!Array.isArray(config.bootstrapAddrs) || !config.bootstrapAddrs.every((value) => typeof value === "string"))
+    ) {
+      throw new Error("p2p-config.json.bootstrapAddrs debe ser texto o una lista de textos");
     }
     runtimeValue = config.bootstrapAddrs;
   }
