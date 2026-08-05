@@ -26,6 +26,10 @@ interface RetryPayload {
   message: string;
   artifacts?: string[];
   attachmentName?: string;
+  documentContext?: {
+    filename: string;
+    text: string;
+  };
 }
 
 export function createApp(container: HTMLElement, version: string = "unknown") {
@@ -34,7 +38,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     isStreaming: false,
     selectedModel: "auto",
     privacyScope: "community",
-    ocrMode: "confirm",
+    ocrMode: "auto",
     kbProviderId: "",
     kbMaxPerQuestion: 1,
     ipfsEnabled: false,
@@ -58,7 +62,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   let promptHistoryIndex = -1;
   let promptHistoryDraft = "";
   let navigatingPromptHistory = false;
-  let awaitingOcrDecision = false;
+  let temporaryDocumentContext: { filename: string; text: string } | null = null;
 
   applyTheme(getInitialTheme());
 
@@ -129,8 +133,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         <label data-tooltip="Qué hacer con el texto extraído de un documento adjunto antes de usarlo">
           Documentos adjuntos:
           <select class="ocr-mode-selector">
-            <option value="confirm" selected>Confirmar antes de usar</option>
-            <option value="auto">Automático (más rápido, sin confirmar)</option>
+            <option value="auto" selected>Uso automático con vista previa OCR</option>
           </select>
         </label>
         <label data-tooltip="Base de conocimiento a consultar para responder preguntas sobre un tema">
@@ -397,7 +400,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     responseMessageId = null;
     pendingMessageId = null;
     queuedSendOptions = null;
-    awaitingOcrDecision = false;
+    temporaryDocumentContext = null;
     resetPromptHistoryNavigation();
     state.messages = [];
     state.isStreaming = false;
@@ -421,7 +424,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     responseMessageId = null;
     pendingMessageId = null;
     queuedSendOptions = null;
-    awaitingOcrDecision = false;
+    temporaryDocumentContext = null;
     resetPromptHistoryNavigation();
     state.messages = [...selected.messages];
     activityLogEl.innerHTML = "";
@@ -611,7 +614,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   function submitMessage() {
     const text = textareaEl.value.trim();
-    if ((!text && !pendingAttachment) || state.isStreaming || awaitingOcrDecision) return;
+    if ((!text && !pendingAttachment) || state.isStreaming) return;
 
     const userContent = text || (pendingAttachment ? (pendingAttachmentIsPdf ? "[PDF adjunto]" : "[imagen adjunta]") : "");
     const createdAt = Date.now();
@@ -626,7 +629,12 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       attachmentName: attachmentName || undefined,
       attachmentIsPdf: pendingAttachmentIsPdf,
     });
-    retryPayloads.set(messageId, { message: text, artifacts, attachmentName: attachmentName || undefined });
+    retryPayloads.set(messageId, {
+      message: text,
+      artifacts,
+      attachmentName: attachmentName || undefined,
+      documentContext: artifacts ? undefined : temporaryDocumentContext || undefined,
+    });
     pendingAttachment = null;
     pendingAttachmentIsPdf = false;
     pendingAttachmentName = null;
@@ -658,6 +666,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       message: payload.message,
       artifacts: payload.artifacts,
       attachmentName: payload.attachmentName,
+      documentContext: payload.documentContext,
       preferences: {
         model: state.selectedModel,
         scope: state.privacyScope,
@@ -753,22 +762,25 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         completeAssistantResponse(event.data.provenance);
         if (pendingMessageId) retryPayloads.delete(pendingMessageId);
         pendingMessageId = null;
-        awaitingOcrDecision = false;
         state.isStreaming = false;
         sendBtn.disabled = false;
         break;
       case "ocr.extracted": {
         hideThinking();
-        awaitingOcrDecision = true;
+        const text = normalizeOcrText(event.data.text);
+        temporaryDocumentContext = { filename: event.data.filename, text };
         const pendingPayload = pendingMessageId ? retryPayloads.get(pendingMessageId) : undefined;
-        addOcrExtractedMessage(
-          event.data.conversationId,
-          event.data.filename,
-          event.data.text,
-          pendingPayload?.message.trim() || undefined,
-        );
-        state.isStreaming = false;
-        sendBtn.disabled = true;
+        addOcrExtractedMessage(event.data.filename, text);
+        if (pendingPayload?.message.trim()) {
+          state.isStreaming = true;
+          sendBtn.disabled = true;
+          showThinking("Texto extraído; procesando tu pregunta…");
+        } else {
+          state.isStreaming = false;
+          sendBtn.disabled = false;
+          pendingMessageId = null;
+          textareaEl.focus();
+        }
         break;
       }
       case "node.lost":
@@ -793,7 +805,6 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         persistActiveConversation();
         responseStartedAt = null;
         pendingMessageId = null;
-        awaitingOcrDecision = false;
         state.isStreaming = false;
         sendBtn.disabled = false;
         break;
@@ -891,7 +902,25 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     thinkingEl = null;
   }
 
-  function addOcrExtractedMessage(missionId: string, filename: string, text: string, originalQuestion?: string) {
+  function normalizeOcrText(rawText: string): string {
+    const raw = rawText.trim();
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && "result" in parsed) {
+        const result = (parsed as { result?: unknown }).result;
+        return typeof result === "string"
+          ? result.trim()
+          : result == null
+            ? ""
+            : JSON.stringify(result);
+      }
+    } catch {
+      // El proveedor puede devolver texto OCR plano; se conserva sin modificar.
+    }
+    return raw;
+  }
+
+  function addOcrExtractedMessage(filename: string, text: string) {
     const div = document.createElement("div");
     div.className = "message assistant ocr-preview";
 
@@ -906,51 +935,10 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     details.appendChild(textEl);
     div.appendChild(details);
 
-    const question = document.createElement("p");
-    question.className = "ocr-preview-question";
-    question.textContent = "¿Uso este documento para responder tu pregunta?";
-    div.appendChild(question);
-
-    const actions = document.createElement("div");
-    actions.className = "ocr-preview-actions";
-
-    const useBtn = document.createElement("button");
-    useBtn.type = "button";
-    useBtn.textContent = "Usar documento";
-    const discardBtn = document.createElement("button");
-    discardBtn.type = "button";
-    discardBtn.className = "secondary";
-    discardBtn.textContent = "Descartar";
-
-    const decide = (use: boolean) => {
-      useBtn.disabled = true;
-      discardBtn.disabled = true;
-      actions.remove();
-      chatConnection?.sendDecision(missionId, use);
-      if (use && originalQuestion) {
-        question.textContent = "✓ Documento confirmado; procesando tu pregunta…";
-        awaitingOcrDecision = false;
-        state.isStreaming = true;
-        sendBtn.disabled = true;
-        showThinking("Procesando tu pregunta con el documento…");
-        return;
-      }
-      question.textContent = use
-        ? "✓ Documento confirmado. Escribe tu pregunta."
-        : "Documento descartado.";
-      if (pendingMessageId) retryPayloads.delete(pendingMessageId);
-      pendingMessageId = null;
-      awaitingOcrDecision = false;
-      state.isStreaming = false;
-      sendBtn.disabled = false;
-      if (use) textareaEl.focus();
-    };
-
-    useBtn.addEventListener("click", () => decide(true));
-    discardBtn.addEventListener("click", () => decide(false));
-    actions.appendChild(useBtn);
-    actions.appendChild(discardBtn);
-    div.appendChild(actions);
+    const status = document.createElement("p");
+    status.className = "ocr-preview-status";
+    status.textContent = "Texto extraído y disponible para las preguntas de este chat.";
+    div.appendChild(status);
 
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;

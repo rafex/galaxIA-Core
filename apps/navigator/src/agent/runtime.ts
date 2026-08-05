@@ -363,9 +363,8 @@ export class AgentRuntime {
 
   /**
    * Ejecuta OCR sobre el artifact adjunto y emite `ocr.extracted`, sin llamar
-   * al LLM — usado por el flujo de confirmación (SPEC-OCRCONFIRM-0001): el
-   * usuario ve el texto extraído antes de decidir si el LLM lo usa o no. El
-   * Portal puede diferir la emisión para registrar primero su estado pendiente.
+   * al LLM. El Portal puede diferir la emisión para registrar primero el
+   * contexto efímero y luego continuar automáticamente con el prompt.
    */
   async extractOcrText(
     artifacts: string[],
@@ -1117,13 +1116,29 @@ function parseDataUrl(dataUrl: string): { base64: string; mimeType: string; exte
 }
 
 function extractText(result: unknown): string {
-  if (typeof result === "string") return result;
+  if (typeof result === "string") {
+    const raw = result.trim();
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && "result" in parsed) {
+        const nested = (parsed as { result?: unknown }).result;
+        return typeof nested === "string" ? nested.trim() : extractText(nested);
+      }
+    } catch {
+      // El proveedor puede devolver texto OCR plano.
+    }
+    return result;
+  }
   if (result && typeof result === "object") {
+    if ("result" in result) {
+      return extractText((result as { result?: unknown }).result);
+    }
     const content = (result as { content?: unknown }).content;
     if (Array.isArray(content)) {
-      return content
+      const text = content
         .map((c) => (c && typeof c === "object" && typeof (c as { text?: unknown }).text === "string" ? (c as { text: string }).text : ""))
         .join("\n");
+      return extractText(text);
     }
     return JSON.stringify(result);
   }

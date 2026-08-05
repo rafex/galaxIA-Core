@@ -18,6 +18,11 @@ export interface ApiOptions {
   message: string;
   artifacts?: string[];
   attachmentName?: string;
+  /** Contexto OCR efímero del chat; viaja dentro del mensaje protobuf. */
+  documentContext?: {
+    filename: string;
+    text: string;
+  };
   preferences?: {
     model?: string;
     scope?: "local" | "network" | "community" | "external";
@@ -238,7 +243,7 @@ export function connectToChat(
           sessionId,
           scope: preferences.scope ?? "community",
           model: preferences.model ?? "",
-          ocrMode: preferences.ocrMode ?? "confirm",
+          ocrMode: preferences.ocrMode ?? "auto",
           kb: preferences.kb ?? "",
           kbMaxPerQuestion: preferences.kbMaxPerQuestion ?? 1,
           ipfsEnabled: preferences.ipfs?.enabled ?? false,
@@ -255,13 +260,16 @@ export function connectToChat(
 
   async function sendChatRequest(options: ApiOptions): Promise<void> {
     if (!stream || !privateKey) return;
+    const message = options.documentContext?.text.trim()
+      ? `${options.message}\n\n[Contexto temporal del documento: ${options.documentContext.filename}]\n${options.documentContext.text}`
+      : options.message;
     await sendEnvelope(stream, newEnvelope({
       sourcePeerId,
       payload: {
         case: "chatRequest",
         value: create(FhsProto.ChatRequestMessageSchema, {
           missionId: sessionId,
-          messages: [create(FhsProto.MessageSchema, { role: "user", content: options.message })],
+          messages: [create(FhsProto.MessageSchema, { role: "user", content: message })],
           model: options.preferences?.model ?? "",
           artifacts: toInlineArtifacts(options.artifacts, options.attachmentName),
         }),

@@ -21,14 +21,6 @@ import type { FhsIdentity, FhsNode } from "./nav-node.js";
 import { decodeStream, sendEnvelope } from "./stream-codec.js";
 import type { P2pProviders } from "./index.js";
 
-interface PendingAttachment {
-  text: string;
-  filename: string;
-  question?: string;
-  preferences: ModelPreferences;
-  confirmed: boolean;
-}
-
 interface PendingKbRecommendation {
   message: { role: "user"; content: string };
   preferences: ModelPreferences;
@@ -65,7 +57,6 @@ export function registerPortalSession(
     let sessionId: string | undefined;
     let preferences: ModelPreferences = {};
     let activeRuntime: AgentRuntime | undefined;
-    const pendingAttachments = new Map<string, PendingAttachment>();
     const pendingKbRecommendations = new Map<string, PendingKbRecommendation>();
     const ragActiveConversations = new Set<string>();
     const clientId = `p2p-portal-${remoteDid}-${Date.now()}`;
@@ -138,20 +129,6 @@ export function registerPortalSession(
       }).catch(() => runChat(id, message, currentPreferences));
     };
 
-    const indexForRag = (id: string, text: string, currentPreferences: ModelPreferences) => {
-      const runtime = new AgentRuntime(
-        providers.atlasClient,
-        eventBus,
-        id,
-        remoteDid,
-        providers.llmGateway,
-        providers.mcpHost,
-      );
-      void runtime.indexDocumentForRag(text, currentPreferences).then((indexed) => {
-        if (indexed) ragActiveConversations.add(id);
-      }).catch(() => undefined);
-    };
-
     try {
       for await (const envelope of messages) {
         switch (envelope.payload.case) {
@@ -178,25 +155,14 @@ export function registerPortalSession(
               break;
             }
             if (artifacts.length > 0) {
-              if (currentPreferences.ocrMode === "auto") {
-                runChat(conversationId, { role: "user", content: lastMessage.content }, currentPreferences, undefined, artifacts);
-                break;
-              }
               const runtime = new AgentRuntime(providers.atlasClient, eventBus, conversationId, remoteDid, providers.llmGateway, providers.mcpHost);
               const filename = artifactFilename(request.artifacts[0]);
               void runtime.extractOcrText(artifacts, filename, currentPreferences, false).then((result) => {
                 if (result.text) {
-                  pendingAttachments.set(conversationId, {
-                    text: result.text,
-                    filename,
-                    question: lastMessage.content || undefined,
-                    preferences: currentPreferences,
-                    confirmed: false,
-                  });
-                  // Register the pending attachment before notifying the Portal.
-                  // Otherwise a fast user click can arrive before the decision
-                  // handler has populated pendingAttachments (SPEC-OCRCONFIRM-0001).
                   eventBus.emit({ type: "ocr.extracted", data: { conversationId, filename, text: result.text } });
+                  if (lastMessage.content.trim()) {
+                    runChat(conversationId, { role: "user", content: lastMessage.content }, currentPreferences, result.text);
+                  }
                 } else {
                   sendError(
                     stream,
@@ -210,31 +176,7 @@ export function registerPortalSession(
               }).catch((error: unknown) => sendError(stream, identity.did, remoteDid, conversationId, "RUNTIME_ERROR", error instanceof Error ? error.message : String(error)));
               break;
             }
-
-            const pending = pendingAttachments.get(conversationId);
-            if (pending?.confirmed) {
-              pendingAttachments.delete(conversationId);
-              runChat(conversationId, { role: "user", content: lastMessage.content }, currentPreferences, pending.text);
-              break;
-            }
             resolveKbAndChat(conversationId, { role: "user", content: lastMessage.content }, currentPreferences);
-            break;
-          }
-          case "attachmentDecision": {
-            const decision = envelope.payload.value;
-            const pending = pendingAttachments.get(decision.missionId);
-            if (!pending) break;
-            if (!decision.use) {
-              pendingAttachments.delete(decision.missionId);
-              break;
-            }
-            indexForRag(decision.missionId, pending.text, pending.preferences);
-            if (pending.question) {
-              pendingAttachments.delete(decision.missionId);
-              runChat(decision.missionId, { role: "user", content: pending.question }, pending.preferences, pending.text);
-            } else {
-              pending.confirmed = true;
-            }
             break;
           }
           case "kbDecision": {
