@@ -98,10 +98,16 @@ interface ResolvedToolProvider {
   service: PublishedService;
 }
 
+export interface OcrExtractionResult {
+  text: string | null;
+  error?: { code: string; message: string };
+}
+
 export class AgentRuntime {
   private llmGateway: LlmGateway;
   private mcpHost: McpHost;
   private artifacts: string[] = [];
+  private lastOcrError: string | undefined;
   private usedTools: Array<{
     capability: string;
     providerId: string;
@@ -364,23 +370,36 @@ export class AgentRuntime {
     artifacts: string[],
     filename: string,
     preferences: ModelPreferences
-  ): Promise<string | null> {
+  ): Promise<OcrExtractionResult> {
     this.artifacts = artifacts;
+    this.lastOcrError = undefined;
     const toolProviders = await this.resolveToolProviders(["document.ocr"], preferences.scope);
     const loadedTools = await this.mcpHost.loadToolsForCapabilities(
       toolProviders.map((t) => ({ providerId: t.providerId, providerName: t.providerName, service: t.service }))
     );
     const ocrTools = loadedTools.filter((t) => t.capabilityId === "document.ocr");
     if (ocrTools.length === 0) {
-      this.emitError("NO_OCR_PROVIDER", "No hay proveedores de OCR disponibles en tu scope");
-      return null;
+      return {
+        text: null,
+        error: { code: "NO_OCR_PROVIDER", message: "No hay proveedores de OCR disponibles en tu scope" },
+      };
     }
 
     const text = await this.runOcrDeterministically(ocrTools, preferences);
     if (text) {
       this.emit({ type: "ocr.extracted", data: { filename, text } });
+      return { text };
     }
-    return text;
+    const ocrError: string | undefined = this.lastOcrError;
+    return {
+      text: null,
+      error: {
+        code: "OCR_FAILED",
+        message: ocrError
+          ? `No se pudo procesar el archivo adjunto: ${String(ocrError)}`
+          : "No se pudo procesar el archivo adjunto.",
+      },
+    };
   }
 
   /**
@@ -719,6 +738,7 @@ export class AgentRuntime {
     if (tools.length === 0) return null;
     const artifact = this.artifacts[0];
     if (!artifact) return null;
+    this.lastOcrError = undefined;
 
     for (let i = 0; i < tools.length; i++) {
       const tool = tools[i];
@@ -764,6 +784,7 @@ export class AgentRuntime {
       } catch (err) {
         const duration = Date.now() - startTime;
         const message = err instanceof Error ? err.message : String(err);
+        this.lastOcrError = message;
         this.emit({ type: "tool.error", data: { name: tool.name, error: message } });
         this.atlasClient.recordSample({
           providerId: tool.providerId,

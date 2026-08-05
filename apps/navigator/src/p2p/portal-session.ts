@@ -183,17 +183,24 @@ export function registerPortalSession(
                 break;
               }
               const runtime = new AgentRuntime(providers.atlasClient, eventBus, conversationId, remoteDid, providers.llmGateway, providers.mcpHost);
-              void runtime.extractOcrText(artifacts, artifactFilename(request.artifacts[0]), currentPreferences).then((text) => {
-                if (text) {
+              void runtime.extractOcrText(artifacts, artifactFilename(request.artifacts[0]), currentPreferences).then((result) => {
+                if (result.text) {
                   pendingAttachments.set(conversationId, {
-                    text,
+                    text: result.text,
                     filename: artifactFilename(request.artifacts[0]),
                     question: lastMessage.content || undefined,
                     preferences: currentPreferences,
                     confirmed: false,
                   });
                 } else {
-                  sendError(stream, identity.did, remoteDid, conversationId, "OCR_FAILED", "No se pudo procesar el archivo adjunto.");
+                  sendError(
+                    stream,
+                    identity.did,
+                    remoteDid,
+                    conversationId,
+                    result.error?.code ?? "OCR_FAILED",
+                    result.error?.message ?? "No se pudo procesar el archivo adjunto.",
+                  );
                 }
               }).catch((error: unknown) => sendError(stream, identity.did, remoteDid, conversationId, "RUNTIME_ERROR", error instanceof Error ? error.message : String(error)));
               break;
