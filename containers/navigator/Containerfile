@@ -31,7 +31,9 @@ RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
 
 RUN export COMMIT_HASH BUILD_DATE && \
     npm run build -w packages/fhs-node && \
-    npm run build -w apps/navigator
+    npm run build -w apps/navigator && \
+    printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
+      > apps/navigator/dist/version.json
 
 # Imagen final mínima
 FROM docker.io/library/node:22-alpine
