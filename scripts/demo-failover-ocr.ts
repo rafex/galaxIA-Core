@@ -448,8 +448,6 @@ function sendChat(fileDataUrl: string, marker: string): Promise<ChatResult> {
   return new Promise((resolve, reject) => {
     const events: AgentEvent[] = [];
     let providerName = "desconocido";
-    let conversationId: string | null = null;
-    let ocrConfirmed = false;
     let completed = false;
 
     const ws = new WebSocket(CHAT_URL);
@@ -480,21 +478,10 @@ function sendChat(fileDataUrl: string, marker: string): Promise<ChatResult> {
 
       switch (event.type) {
         case "session":
-          conversationId = event.data.conversationId;
           break;
 
         case "ocr.extracted":
-          vlog(`CHAT:${marker}`, `OCR extraído — confirmando uso...`);
-          if (conversationId && !ocrConfirmed) {
-            ocrConfirmed = true;
-            ws.send(
-              JSON.stringify({
-                type: "attachment.decision",
-                conversationId,
-                use: true,
-              })
-            );
-          }
+          vlog(`CHAT:${marker}`, `OCR extraído — uso automático en el contexto de la pregunta`);
           break;
 
         case "tool.selected":

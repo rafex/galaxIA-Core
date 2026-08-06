@@ -21,11 +21,13 @@ import { applyTheme, cycleTheme, getCurrentTheme, getInitialTheme, themeLabel } 
 import { createDrawerGroup } from "./drawer.js";
 import { initTooltips, refreshTooltip } from "./tooltip.js";
 import { createTour, hasTourRun, type TourStep } from "./tour.js";
+import { LocalRagStore, type LocalRagChunk } from "../services/local-rag/index.js";
 
 interface RetryPayload {
   message: string;
   artifacts?: string[];
   attachmentName?: string;
+  documentId?: string;
   documentContext?: {
     filename: string;
     text: string;
@@ -62,6 +64,25 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   let promptHistoryDraft = "";
   let navigatingPromptHistory = false;
   let temporaryDocumentContext: { filename: string; text: string } | null = null;
+  let activeDocumentId: string | undefined;
+  const localRag = typeof Worker === "undefined" ? null : new LocalRagStore();
+
+  localRag?.onStatus((status) => {
+    if (!state.isStreaming) return;
+    const labels = {
+      "loading-embedding-model": "Preparando búsqueda local…",
+      indexing: "Indexando el documento en este navegador…",
+      querying: "Buscando contexto relevante…",
+      fallback: "SQLite local no disponible; usando IndexedDB…",
+      idle: "",
+    } as const;
+    const label = labels[status.phase];
+    if (label) {
+      const message = status.detail ? `${label} ${status.detail}` : label;
+      showThinking(message);
+      addActivityItem("info", message);
+    }
+  });
 
   applyTheme(getInitialTheme());
 
@@ -132,7 +153,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         <label data-tooltip="Base de conocimiento a consultar para responder preguntas sobre un tema">
           Base de conocimiento:
           <select class="kb-selector">
-            <option value="" selected>Recomendada automáticamente (con confirmación)</option>
+            <option value="" selected>Recomendada automáticamente</option>
           </select>
         </label>
         <label data-tooltip="Cuántas bases de conocimiento se consultan a la vez cuando no eliges una manualmente">
@@ -347,6 +368,12 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   clearHistoryBtn.addEventListener("click", () => {
     if (!window.confirm("¿Borrar todas las conversaciones guardadas en este navegador?")) return;
+    const conversationIds = chatHistory.conversations.map((conversation) => conversation.id);
+    if (localRag) {
+      void Promise.all(conversationIds.map((id) => localRag.deleteConversation(id))).catch(() => {
+        addActivityItem("warning", "No se pudo limpiar todo el índice RAG local.");
+      });
+    }
     chatHistory = createChatHistory();
     saveChatHistory(chatHistory);
     startNewConversation();
@@ -389,6 +416,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     pendingMessageId = null;
     queuedSendOptions = null;
     temporaryDocumentContext = null;
+    activeDocumentId = undefined;
     resetPromptHistoryNavigation();
     state.messages = [];
     state.isStreaming = false;
@@ -413,6 +441,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     pendingMessageId = null;
     queuedSendOptions = null;
     temporaryDocumentContext = null;
+    activeDocumentId = undefined;
     resetPromptHistoryNavigation();
     state.messages = [...selected.messages];
     activityLogEl.innerHTML = "";
@@ -600,7 +629,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     ipfsGatewayInfo.textContent = `Gateway público: ${gateway}`;
   }
 
-  function submitMessage() {
+  async function submitMessage() {
     const text = textareaEl.value.trim();
     if ((!text && !pendingAttachment) || state.isStreaming) return;
 
@@ -609,7 +638,11 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     const messageId = crypto.randomUUID();
     const artifacts = pendingAttachment ? [pendingAttachment] : undefined;
     const attachmentName = pendingAttachmentName;
-    if (artifacts) temporaryDocumentContext = null;
+    const documentId = artifacts ? crypto.randomUUID() : activeDocumentId;
+    if (artifacts) {
+      temporaryDocumentContext = null;
+      activeDocumentId = documentId;
+    }
     addMessage({
       id: messageId,
       role: "user",
@@ -622,6 +655,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       message: text,
       artifacts,
       attachmentName: attachmentName || undefined,
+      documentId,
       documentContext: artifacts ? undefined : temporaryDocumentContext || undefined,
     });
     pendingAttachment = null;
@@ -632,10 +666,10 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     textareaEl.value = "";
     textareaEl.style.height = "auto";
     resetPromptHistoryNavigation();
-    dispatchMessage(messageId, { message: text, artifacts, attachmentName: attachmentName || undefined });
+    await dispatchMessage(messageId, { message: text, artifacts, attachmentName: attachmentName || undefined, documentId });
   }
 
-  function dispatchMessage(messageId: string, payload: RetryPayload) {
+  async function dispatchMessage(messageId: string, payload: RetryPayload) {
     const userMessage = state.messages.find((message) => message.id === messageId);
     if (!userMessage || userMessage.role !== "user") return;
     userMessage.failed = false;
@@ -650,12 +684,14 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     showThinking("Conectando con la red FHS…");
     persistActiveConversation();
 
+    const documentContext = await resolveDocumentContext(payload);
+    if (!state.isStreaming || pendingMessageId !== messageId) return;
     const sendOptions = {
       conversationId: conversationId || undefined,
       message: payload.message,
       artifacts: payload.artifacts,
       attachmentName: payload.attachmentName,
-      documentContext: payload.documentContext,
+      documentContext,
       preferences: {
         model: state.selectedModel,
         scope: state.privacyScope,
@@ -713,7 +749,32 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       renderMessages();
     }
     retryPayloads.set(messageId, payload);
-    dispatchMessage(messageId, payload);
+    void dispatchMessage(messageId, payload);
+  }
+
+  async function resolveDocumentContext(payload: RetryPayload): Promise<RetryPayload["documentContext"]> {
+    if (!payload.message.trim() || payload.artifacts || !localRag) return payload.documentContext;
+    const conversation = ensureHistoryConversation();
+    try {
+      const chunks = await localRag.query({
+        conversationId: conversation.id,
+        documentId: payload.documentId,
+        query: payload.message,
+        topK: 4,
+      });
+      if (chunks.length > 0) return toDocumentContext(chunks);
+    } catch (error) {
+      addActivityItem("warning", `RAG local no disponible; se usará el contexto temporal. ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return payload.documentContext ?? temporaryDocumentContext ?? undefined;
+  }
+
+  function toDocumentContext(chunks: LocalRagChunk[]): { filename: string; text: string } {
+    const filename = chunks[0]?.filename || temporaryDocumentContext?.filename || "Documento";
+    const text = chunks
+      .map((chunk) => `[${chunk.filename} · fragmento ${chunk.chunkIndex + 1}]\n${chunk.text}`)
+      .join("\n\n");
+    return { filename, text };
   }
 
   function handleEvent(event: AgentEvent) {
@@ -758,7 +819,15 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         const text = normalizeOcrText(event.data.text);
         temporaryDocumentContext = { filename: event.data.filename, text };
         const pendingPayload = pendingMessageId ? retryPayloads.get(pendingMessageId) : undefined;
+        const documentId = pendingPayload?.documentId ?? activeDocumentId ?? crypto.randomUUID();
+        activeDocumentId = documentId;
         addOcrExtractedMessage(event.data.filename, text);
+        if (localRag) {
+          const conversation = ensureHistoryConversation();
+          void localRag.index({ conversationId: conversation.id, documentId, filename: event.data.filename, text })
+            .then((result) => addActivityItem("success", `RAG local: ${result.chunksIndexed} fragmentos indexados (${result.backend}).`))
+            .catch((error: unknown) => addActivityItem("warning", `No se pudo indexar localmente el documento: ${error instanceof Error ? error.message : String(error)}`));
+        }
         if (pendingPayload?.message.trim()) {
           state.isStreaming = true;
           sendBtn.disabled = true;

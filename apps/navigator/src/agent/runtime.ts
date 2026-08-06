@@ -397,10 +397,9 @@ export class AgentRuntime {
   }
 
   /**
-   * Indexa un documento ya confirmado en un rag-provider (SPEC-RAG-0001) —
-   * llamado por la sesión Portal en el mismo instante en que se resuelve
-   * `attachment.decision { use: true }`, nunca antes ni de forma
-   * especulativa. Degradación graceful: si no hay ningún rag-provider en el
+   * Indexa un documento recibido después del OCR en un rag-provider histórico
+   * (SPEC-RAG-0001). El flujo vigente usa RAG local en el Portal y no requiere
+   * confirmación manual. Degradación graceful: si no hay ningún rag-provider en el
    * scope del usuario, simplemente no hay RAG disponible para esta
    * conversación — no es un error visible para el usuario.
    */
