@@ -12,6 +12,7 @@ import {
   type ToolDefinition,
   type UserMessage,
 } from "@rafex/galaxia-fhs-protocol";
+import type { DocumentContext } from "@rafex/galaxia-fhs-protocol/generated";
 import type { AgentEvent, ProvenanceInfo } from "./events.js";
 
 /**
@@ -40,6 +41,8 @@ export interface ModelPreferences {
   model?: string;
   scope?: PrivacyScope;
   allowExternalProviders?: boolean;
+  /** Fuente RAG fija de la conversación: el MVP no fusiona local y red. */
+  ragSource?: "local" | "network";
   /**
    * "Kill" configurable de la espera de una Mission/Star (DEC-0010): cuánto
    * tiempo (ms) espera el Agent Server una respuesta antes de abandonar y
@@ -128,7 +131,9 @@ export class AgentRuntime {
     artifacts?: string[],
     preExtractedText?: string,
     ragActive?: boolean,
-    kbProviderIds?: string[]
+    kbProviderIds?: string[],
+    documentContext?: DocumentContext,
+    documentId?: string,
   ) {
     this.artifacts = preExtractedText ? [] : artifacts || [];
     this.emitStatus("classifying", "Analizando tu petición...");
@@ -176,8 +181,14 @@ export class AgentRuntime {
     // confiables tomando esa decisión (ver spec-native/DECISIONS.md DEC-0020) —
     // cuando el usuario adjunta un archivo, la intención ya es inequívoca.
     let userContent = message.content;
-    if (preExtractedText) {
-      userContent = `[Texto extraído automáticamente del archivo adjunto mediante OCR]\n${preExtractedText}\n\n[Pregunta del usuario]\n${message.content}`;
+    if (documentContext?.chunks.length) {
+      const chunks = documentContext.chunks
+        .filter((chunk) => chunk.text.trim())
+        .map((chunk) => `[${chunk.filename || documentContext.filename} · fragmento ${chunk.chunkIndex + 1}]\n${chunk.text}`)
+        .join("\n---\n");
+      userContent = chunks
+        ? `[Fragmentos relevantes del documento recuperados por RAG local]\n${chunks}\n\n[Pregunta del usuario]\n${message.content}`
+        : message.content;
       // No hay archivo real en este turno (ya se extrajo antes) — si se deja
       // la tool disponible, el LLM puede igual decidir invocarla sin adjunto
       // y fallar (ver bug encontrado en la demo multi-host: el modelo llamaba
@@ -199,8 +210,11 @@ export class AgentRuntime {
             loadedTools.splice(i, 1);
           }
         }
+        // El OCR solo se usa para indexar/recuperar. Nunca se concatena el
+        // documento completo al prompt: el Portal debe enviar DocumentChunk[]
+        // (RAG local) o la sesión debe consultar el provider (RAG network).
         userContent = ocrText
-          ? `[Texto extraído automáticamente del archivo adjunto mediante OCR]\n${ocrText}\n\n[Pregunta del usuario]\n${message.content}`
+          ? `${message.content}\n\n(El documento fue procesado por OCR y queda disponible para recuperación RAG.)`
           : `${message.content}\n\n(No se pudo extraer texto del archivo adjunto.)`;
       }
     }
@@ -209,8 +223,8 @@ export class AgentRuntime {
     // vía tool calling — se dispara en cada turno de una conversación ya
     // marcada como "RAG activa" por la sesión Portal. Silenciosa: no se expone en
     // la UI qué fragmentos se recuperaron (a diferencia de OCR).
-    if (ragActive) {
-      const ragContext = await this.queryRagContext(message.content, preferences);
+    if (ragActive && preferences.ragSource === "network") {
+      const ragContext = await this.queryRagContext(message.content, preferences, 3, undefined, documentId);
       if (ragContext) {
         userContent = `[Fragmentos relevantes del documento indexado]\n${ragContext}\n\n[Pregunta del usuario]\n${userContent}`;
       }
@@ -406,7 +420,8 @@ export class AgentRuntime {
   async indexDocumentForRag(
     text: string,
     preferences: ModelPreferences,
-    source = "user-upload"
+    source = "user-upload",
+    documentId?: string,
   ): Promise<boolean> {
     const toolProviders = await this.resolveToolProviders(["document.index"], preferences.scope);
     const loadedTools = await this.mcpHost.loadToolsForCapabilities(
@@ -419,7 +434,7 @@ export class AgentRuntime {
       await this.mcpHost.callTool(
         indexTool.providerId,
         indexTool.name,
-        { text, conversationId: this.conversationId, source },
+        { text, conversationId: this.conversationId, documentId: documentId ?? "", source },
         preferences.maxWaitMs,
         { conversationId: this.conversationId, capabilityId: indexTool.capabilityId, deviceId: this.deviceId }
       );
@@ -440,7 +455,8 @@ export class AgentRuntime {
     preferences: ModelPreferences,
     topK = 3,
     /** Etiqueta opcional por `source` (SPEC-KB-0002) — usado por la fusión multi-KB para citar de qué KB vino cada fragmento. */
-    labelSource?: (source: string) => string | undefined
+    labelSource?: (source: string) => string | undefined,
+    documentId?: string,
   ): Promise<string | null> {
     const toolProviders = await this.resolveToolProviders(["document.query"], preferences.scope);
     const loadedTools = await this.mcpHost.loadToolsForCapabilities(
@@ -454,7 +470,7 @@ export class AgentRuntime {
       const { message: result, dispatchMs } = await this.mcpHost.callTool(
         queryTool.providerId,
         queryTool.name,
-        { query, conversationId: this.conversationId, top_k: topK },
+        { query, conversationId: this.conversationId, documentId: documentId ?? "", top_k: topK },
         preferences.maxWaitMs,
         { conversationId: this.conversationId, capabilityId: queryTool.capabilityId, deviceId: this.deviceId }
       );

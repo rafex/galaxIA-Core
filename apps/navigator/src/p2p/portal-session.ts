@@ -25,7 +25,8 @@ interface PendingKbRecommendation {
   message: { role: "user"; content: string };
   preferences: ModelPreferences;
   candidates: Array<{ providerId: string; providerName: string; description: string }>;
-  preExtractedText?: string;
+  documentContext?: FhsProto.DocumentContext;
+  documentId?: string;
 }
 
 export function registerPortalSession(
@@ -75,7 +76,8 @@ export function registerPortalSession(
       id: string,
       message: { role: "user"; content: string },
       currentPreferences: ModelPreferences,
-      preExtractedText?: string,
+      documentContext?: FhsProto.DocumentContext,
+      documentId?: string,
       artifacts?: string[],
       kbProviderIds?: string[],
     ) => {
@@ -91,9 +93,11 @@ export function registerPortalSession(
         message,
         currentPreferences,
         artifacts,
-        preExtractedText,
+        undefined,
         ragActiveConversations.has(id),
         kbProviderIds,
+        documentContext,
+        documentId,
       ).catch((error: unknown) => {
         eventBus.emit({
           type: "error",
@@ -110,10 +114,11 @@ export function registerPortalSession(
       id: string,
       message: { role: "user"; content: string },
       currentPreferences: ModelPreferences,
-      preExtractedText?: string,
+      documentContext?: FhsProto.DocumentContext,
+      documentId?: string,
     ) => {
       if (currentPreferences.kb) {
-        runChat(id, message, currentPreferences, preExtractedText, undefined, [currentPreferences.kb]);
+        runChat(id, message, currentPreferences, documentContext, documentId, undefined, [currentPreferences.kb]);
         return;
       }
 
@@ -127,12 +132,12 @@ export function registerPortalSession(
       );
       void runtime.resolveKbCandidates(message.content, currentPreferences).then(({ candidates, chosenByLlm }) => {
         if (candidates.length === 0) {
-          runChat(id, message, currentPreferences, preExtractedText);
+          runChat(id, message, currentPreferences, documentContext, documentId);
           return;
         }
-        pendingKbRecommendations.set(id, { message, preferences: currentPreferences, candidates, preExtractedText });
+        pendingKbRecommendations.set(id, { message, preferences: currentPreferences, candidates, documentContext, documentId });
         eventBus.emit({ type: "kb.recommended", data: { conversationId: id, candidates, chosenByLlm } });
-      }).catch(() => runChat(id, message, currentPreferences, preExtractedText));
+      }).catch(() => runChat(id, message, currentPreferences, documentContext, documentId));
     };
 
     try {
@@ -153,7 +158,8 @@ export function registerPortalSession(
             const conversationId = sessionId || request.missionId || crypto.randomUUID();
             sessionId = conversationId;
             const currentPreferences = { ...preferences, model: request.model || preferences.model };
-            const documentContext = request.documentContext?.text.trim() || undefined;
+            const documentContext = request.documentContext;
+            const documentId = request.documentId || documentContext?.documentId || undefined;
             let artifacts: string[];
             try {
               artifacts = await artifactRefsToDataUrls(request.artifacts);
@@ -167,9 +173,17 @@ export function registerPortalSession(
               void runtime.extractOcrText(artifacts, filename, currentPreferences, false).then((result) => {
                 if (result.text) {
                   eventBus.emit({ type: "ocr.extracted", data: { conversationId, filename, text: result.text } });
-                  if (lastMessage.content.trim()) {
-                    runChat(conversationId, { role: "user", content: lastMessage.content }, currentPreferences, result.text);
-                  }
+                  if (currentPreferences.ragSource === "local") return;
+                  void runtime.indexDocumentForRag(result.text, currentPreferences, "user-upload", documentId).then((indexed) => {
+                    if (!indexed) {
+                      sendError(stream, identity.did, remoteDid, conversationId, "RAG_UNAVAILABLE", "No hay un proveedor RAG de red disponible para esta conversación.");
+                      return;
+                    }
+                    ragActiveConversations.add(conversationId);
+                    if (lastMessage.content.trim()) {
+                      resolveKbAndChat(conversationId, { role: "user", content: lastMessage.content }, currentPreferences, undefined, documentId);
+                    }
+                  });
                 } else {
                   sendError(
                     stream,
@@ -188,6 +202,7 @@ export function registerPortalSession(
               { role: "user", content: lastMessage.content },
               currentPreferences,
               documentContext,
+              documentId,
             );
             break;
           }
@@ -196,7 +211,7 @@ export function registerPortalSession(
             const pending = pendingKbRecommendations.get(decision.missionId);
             if (!pending) break;
             pendingKbRecommendations.delete(decision.missionId);
-            runChat(decision.missionId, pending.message, pending.preferences, pending.preExtractedText, undefined, decision.use ? pending.candidates.map((candidate) => candidate.providerId) : undefined);
+            runChat(decision.missionId, pending.message, pending.preferences, pending.documentContext, pending.documentId, undefined, decision.use ? pending.candidates.map((candidate) => candidate.providerId) : undefined);
             break;
           }
           case "chatCancel":
@@ -225,6 +240,7 @@ function preferencesFromStart(value: FhsProto.AgentStartMessage): ModelPreferenc
       network: value.ipfsNetwork === "private" ? "private" : "public",
       retention: value.ipfsRetention === "reuse" ? "reuse" : "ephemeral",
     } : undefined,
+    ragSource: value.ragSource === FhsProto.RagSource.NETWORK ? "network" : "local",
   };
 }
 

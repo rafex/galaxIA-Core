@@ -21,8 +21,20 @@ export interface ApiOptions {
   /** Contexto OCR efímero del chat; viaja como DocumentContext Protobuf. */
   documentContext?: {
     filename: string;
-    text: string;
+    documentId?: string;
+    source?: "local" | "network";
+    embeddingModel?: string;
+    embeddingDimensions?: number;
+    chunks: Array<{
+      chunkId: string;
+      filename: string;
+      chunkIndex: number;
+      text: string;
+      score: number;
+      source?: string;
+    }>;
   };
+  documentId?: string;
   preferences?: {
     model?: string;
     scope?: "local" | "network" | "community" | "external";
@@ -34,6 +46,7 @@ export interface ApiOptions {
       network: "public" | "private";
       retention: "ephemeral" | "reuse";
     };
+    ragSource?: "local" | "network";
   };
 }
 
@@ -246,6 +259,7 @@ export function connectToChat(
           ipfsEnabled: preferences.ipfs?.enabled ?? false,
           ipfsNetwork: preferences.ipfs?.network ?? "public",
           ipfsRetention: preferences.ipfs?.retention ?? "ephemeral",
+          ragSource: preferences.ragSource === "network" ? FhsProto.RagSource.NETWORK : FhsProto.RagSource.LOCAL,
         }),
       },
       }), privateKey);
@@ -267,8 +281,12 @@ export function connectToChat(
           model: options.preferences?.model ?? "",
           artifacts: toInlineArtifacts(options.artifacts, options.attachmentName),
           documentContext: options.documentContext
-            ? create(FhsProto.DocumentContextSchema, options.documentContext)
+            ? create(FhsProto.DocumentContextSchema, {
+              ...options.documentContext,
+              source: options.documentContext.source === "network" ? FhsProto.RagSource.NETWORK : FhsProto.RagSource.LOCAL,
+            })
             : undefined,
+          documentId: options.documentId ?? options.documentContext?.documentId ?? "",
         }),
       },
     }), privateKey);

@@ -25,6 +25,7 @@ export type ChatMessage =
   };
 
 export type RagMode = "common" | "independent";
+export type RagSource = "local" | "network";
 
 export interface ChatConversation {
   id: string;
@@ -32,6 +33,7 @@ export interface ChatConversation {
   createdAt: number;
   updatedAt: number;
   ragMode: RagMode;
+  ragSource: RagSource;
   messages: ChatMessage[];
 }
 

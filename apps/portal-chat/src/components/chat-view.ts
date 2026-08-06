@@ -1,4 +1,4 @@
-import type { AgentEvent, ChatConversation, ChatMessage, ChatState, KbCitation, ProvenanceInfo, RagMode } from "../types/fhs.js";
+import type { AgentEvent, ChatConversation, ChatMessage, ChatState, KbCitation, ProvenanceInfo, RagMode, RagSource } from "../types/fhs.js";
 import {
   connectToChat,
   type ApiOptions,
@@ -30,7 +30,18 @@ interface RetryPayload {
   documentId?: string;
   documentContext?: {
     filename: string;
-    text: string;
+    documentId?: string;
+    source?: RagSource;
+    embeddingModel?: string;
+    embeddingDimensions?: number;
+    chunks: Array<{
+      chunkId: string;
+      filename: string;
+      chunkIndex: number;
+      text: string;
+      score: number;
+      source?: string;
+    }>;
   };
 }
 
@@ -51,6 +62,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   let historyConversationId: string | null = null;
   let chatHistory: ChatHistory = createChatHistory();
   let pendingConversationRagMode: RagMode = "common";
+  let pendingConversationRagSource: RagSource = "local";
   let responseStartedAt: number | null = null;
   let responseMessageId: string | null = null;
   let pendingMessageId: string | null = null;
@@ -121,6 +133,17 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         <div class="conversation-rag-dialog-card">
           <h2 id="conversation-rag-title">Nueva conversación</h2>
           <p>¿Cómo quieres que esta conversación use el contexto de documentos?</p>
+          <fieldset>
+            <legend>Fuente del RAG</legend>
+            <label class="rag-mode-option">
+              <input type="radio" name="new-conversation-rag-source" value="local" checked />
+              <span><strong>RAG local</strong><small>Conserva el documento en este navegador y no lo envía a la red GalaxIA.</small></span>
+            </label>
+            <label class="rag-mode-option">
+              <input type="radio" name="new-conversation-rag-source" value="network" />
+              <span><strong>RAG GalaxIA</strong><small>Indexa el documento en un satélite RAG descubierto en la red GalaxIA.</small></span>
+            </label>
+          </fieldset>
           <fieldset>
             <legend>Ámbito del RAG</legend>
             <label class="rag-mode-option">
@@ -394,8 +417,12 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   ragDialogCancel.addEventListener("click", closeNewConversationDialog);
   ragDialogCreate.addEventListener("click", () => {
-    const selected = container.querySelector<HTMLInputElement>('input[name="new-conversation-rag-mode"]:checked');
-    startNewConversation(selected?.value === "independent" ? "independent" : "common");
+    const selectedMode = container.querySelector<HTMLInputElement>('input[name="new-conversation-rag-mode"]:checked');
+    const selectedSource = container.querySelector<HTMLInputElement>('input[name="new-conversation-rag-source"]:checked');
+    startNewConversation(
+      selectedMode?.value === "independent" ? "independent" : "common",
+      selectedSource?.value === "network" ? "network" : "local",
+    );
     closeNewConversationDialog();
   });
   ragDialog.addEventListener("click", (event) => {
@@ -437,6 +464,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     const active = chatHistory.conversations[0];
     historyConversationId = active?.id ?? null;
     pendingConversationRagMode = active?.ragMode ?? "common";
+    pendingConversationRagSource = active?.ragSource ?? "local";
     state.messages = active ? [...active.messages] : [];
     renderConversationList();
     renderMessages();
@@ -446,6 +474,15 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     ragDialog.hidden = false;
     const commonOption = container.querySelector<HTMLInputElement>('input[name="new-conversation-rag-mode"][value="common"]');
     const independentOption = container.querySelector<HTMLInputElement>('input[name="new-conversation-rag-mode"][value="independent"]');
+    const localSourceOption = container.querySelector<HTMLInputElement>('input[name="new-conversation-rag-source"][value="local"]');
+    const networkSourceOption = container.querySelector<HTMLInputElement>('input[name="new-conversation-rag-source"][value="network"]');
+    if (pendingConversationRagSource === "network") {
+      if (localSourceOption) localSourceOption.checked = false;
+      if (networkSourceOption) networkSourceOption.checked = true;
+    } else {
+      if (localSourceOption) localSourceOption.checked = true;
+      if (networkSourceOption) networkSourceOption.checked = false;
+    }
     if (pendingConversationRagMode === "independent") {
       if (commonOption) commonOption.checked = false;
       if (independentOption) independentOption.checked = true;
@@ -460,12 +497,13 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     ragDialog.hidden = true;
   }
 
-  function startNewConversation(ragMode: RagMode = "common") {
+  function startNewConversation(ragMode: RagMode = "common", ragSource: RagSource = "local") {
     chatConnection?.close();
     chatConnection = null;
     conversationId = null;
     historyConversationId = null;
     pendingConversationRagMode = ragMode;
+    pendingConversationRagSource = ragSource;
     responseStartedAt = null;
     responseMessageId = null;
     pendingMessageId = null;
@@ -492,6 +530,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     conversationId = null;
     historyConversationId = selected.id;
     pendingConversationRagMode = selected.ragMode;
+    pendingConversationRagSource = selected.ragSource;
     responseStartedAt = null;
     responseMessageId = null;
     pendingMessageId = null;
@@ -554,7 +593,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       ? chatHistory.conversations.find((conversation) => conversation.id === historyConversationId)
       : undefined;
     if (active) return active;
-    const conversation = createConversation(Date.now(), undefined, pendingConversationRagMode);
+    const conversation = createConversation(Date.now(), undefined, pendingConversationRagMode, pendingConversationRagSource);
     historyConversationId = conversation.id;
     chatHistory = upsertConversation(chatHistory, conversation);
     saveChatHistory(chatHistory);
@@ -586,7 +625,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       title.textContent = conversation.title;
       const ragMode = document.createElement("small");
       ragMode.className = "conversation-rag-mode";
-      ragMode.textContent = conversation.ragMode === "common" ? "RAG común" : "RAG independiente";
+      ragMode.textContent = `${conversation.ragSource === "local" ? "RAG local" : "RAG GalaxIA"} · ${conversation.ragMode === "common" ? "común" : "independiente"}`;
       details.append(title, ragMode);
       const time = document.createElement("time");
       time.className = "conversation-time";
@@ -718,7 +757,9 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       artifacts,
       attachmentName: attachmentName || undefined,
       documentId,
-      documentContext: artifacts ? undefined : temporaryDocumentContext || undefined,
+      // El OCR completo se conserva solo para la vista previa. El transporte
+      // recibe únicamente los fragmentos recuperados por resolveDocumentContext.
+      documentContext: undefined,
     });
     pendingAttachment = null;
     pendingAttachmentIsPdf = false;
@@ -760,6 +801,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         allowExternalProviders: state.privacyScope === "external",
         kb: state.kbProviderId || undefined,
         kbMaxPerQuestion: state.kbMaxPerQuestion,
+        ragSource: ensureHistoryConversation().ragSource,
         ipfs: state.ipfsEnabled
           ? { enabled: true, network: state.ipfsNetwork, retention: state.ipfsRetention }
           : undefined,
@@ -815,8 +857,8 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   }
 
   async function resolveDocumentContext(payload: RetryPayload): Promise<RetryPayload["documentContext"]> {
-    if (!payload.message.trim() || payload.artifacts || !localRag) return payload.documentContext;
     const conversation = ensureHistoryConversation();
+    if (conversation.ragSource !== "local" || !payload.message.trim() || payload.artifacts || !localRag) return payload.documentContext;
     try {
       const chunks = await localRag.query({
         conversationId: conversation.id,
@@ -829,15 +871,25 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     } catch (error) {
       addActivityItem("warning", `RAG local no disponible; se usará el contexto temporal. ${error instanceof Error ? error.message : String(error)}`);
     }
-    return payload.documentContext ?? temporaryDocumentContext ?? undefined;
+    return payload.documentContext;
   }
 
-  function toDocumentContext(chunks: LocalRagChunk[]): { filename: string; text: string } {
+  function toDocumentContext(chunks: LocalRagChunk[]): NonNullable<RetryPayload["documentContext"]> {
     const filename = chunks[0]?.filename || temporaryDocumentContext?.filename || "Documento";
-    const text = chunks
-      .map((chunk) => `[${chunk.filename} · fragmento ${chunk.chunkIndex + 1}]\n${chunk.text}`)
-      .join("\n\n");
-    return { filename, text };
+    return {
+      filename,
+      documentId: chunks[0]?.documentId,
+      source: "local",
+      embeddingModel: chunks[0]?.embeddingModel,
+      embeddingDimensions: chunks[0]?.embeddingDimensions,
+      chunks: chunks.map((chunk) => ({
+        chunkId: chunk.id,
+        filename: chunk.filename,
+        chunkIndex: chunk.chunkIndex,
+        text: chunk.text,
+        score: chunk.score,
+      })),
+    };
   }
 
   function handleEvent(event: AgentEvent) {
@@ -882,19 +934,50 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         const text = normalizeOcrText(event.data.text);
         temporaryDocumentContext = { filename: event.data.filename, text };
         const pendingPayload = pendingMessageId ? retryPayloads.get(pendingMessageId) : undefined;
+        const pendingId = pendingMessageId;
         const documentId = pendingPayload?.documentId ?? activeDocumentId ?? crypto.randomUUID();
         activeDocumentId = documentId;
         addOcrExtractedMessage(event.data.filename, text);
-        if (localRag) {
-          const conversation = ensureHistoryConversation();
-          void localRag.index({ conversationId: conversation.id, ragScope: conversationRagScope(conversation), documentId, filename: event.data.filename, text })
-            .then((result) => addActivityItem("success", `RAG local: ${result.chunksIndexed} fragmentos indexados (${result.backend}).`))
-            .catch((error: unknown) => addActivityItem("warning", `No se pudo indexar localmente el documento: ${error instanceof Error ? error.message : String(error)}`));
-        }
-        if (pendingPayload?.message.trim()) {
+        const conversation = ensureHistoryConversation();
+        if (conversation.ragSource === "local" && localRag && pendingId && pendingPayload?.message.trim()) {
           state.isStreaming = true;
           sendBtn.disabled = true;
-          showThinking("Texto extraído; procesando tu pregunta…");
+          showThinking("Texto extraído; indexando y buscando fragmentos locales…");
+          void localRag.index({ conversationId: conversation.id, ragScope: conversationRagScope(conversation), documentId, filename: event.data.filename, text })
+            .then(async (result) => {
+              addActivityItem("success", `RAG local: ${result.chunksIndexed} fragmentos indexados (${result.backend}).`);
+              const chunks = await localRag.query({
+                conversationId: conversation.id,
+                ragScope: conversationRagScope(conversation),
+                documentId,
+                query: pendingPayload.message,
+                topK: 4,
+              });
+              retryPayloads.set(pendingId, {
+                ...pendingPayload,
+                artifacts: undefined,
+                documentContext: chunks.length > 0 ? toDocumentContext(chunks) : undefined,
+              });
+              await dispatchMessage(pendingId, retryPayloads.get(pendingId)!);
+            })
+            .catch((error: unknown) => {
+              addActivityItem("error", `No se pudo preparar el RAG local: ${error instanceof Error ? error.message : String(error)}`);
+              markPendingMessageFailed(error instanceof Error ? error.message : String(error));
+              pendingMessageId = null;
+              state.isStreaming = false;
+              sendBtn.disabled = false;
+              persistActiveConversation();
+            });
+        } else if (conversation.ragSource === "network" && pendingPayload?.message.trim()) {
+          state.isStreaming = true;
+          sendBtn.disabled = true;
+          showThinking("Texto extraído; el RAG GalaxIA está preparando la respuesta…");
+        } else if (conversation.ragSource === "local" && pendingId && pendingPayload?.message.trim()) {
+          // Navegadores sin Worker/IndexedDB siguen pudiendo conversar, pero
+          // no envían el OCR completo como sustituto del RAG local.
+          retryPayloads.set(pendingId, { ...pendingPayload, artifacts: undefined, documentContext: undefined });
+          addActivityItem("warning", "RAG local no disponible en este navegador; se responderá sin contexto documental.");
+          void dispatchMessage(pendingId, retryPayloads.get(pendingId)!);
         } else {
           state.isStreaming = false;
           sendBtn.disabled = false;

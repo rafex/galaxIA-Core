@@ -238,10 +238,16 @@ async function queryIndexedDb(request: LocalRagQuery, key: string, queryVector: 
 async function deleteConversation(conversationId: string): Promise<LocalRagIndexResult> {
   await ensureSqlite();
   if (db) {
+    const scopeRows = db.selectArrays("SELECT DISTINCT scope_key FROM rag_chunks WHERE conversation_id = ?", [conversationId]);
     const statement = db.prepare("DELETE FROM rag_chunks WHERE conversation_id = ?");
     try { statement.bind([conversationId]).stepReset(); } finally { statement.finalize(); }
-    const vectors = db.prepare("DELETE FROM rag_embeddings WHERE scope_key LIKE ?");
-    try { vectors.bind([`${conversationId}${RAG_SCOPE_SEPARATOR}%`]).stepReset(); } finally { vectors.finalize(); }
+    const vectors = db.prepare("DELETE FROM rag_embeddings WHERE scope_key = ?");
+    try {
+      for (const row of scopeRows) {
+        if (typeof row[0] !== "string") continue;
+        vectors.bind([row[0]]).stepReset();
+      }
+    } finally { vectors.finalize(); }
     return { documentId: "", chunksIndexed: 0, embeddingModel: DEFAULT_EMBEDDING_MODEL, embeddingDimensions: DEFAULT_EMBEDDING_DIMENSIONS, backend: sqliteBackend };
   }
   const database = await openIndexedDb();

@@ -182,7 +182,7 @@ function guessCapability(toolName: string): string {
   const mapping: Record<string, string> = {
     extract_text: "document.ocr",
     ocr_extract: "document.ocr",
-    document_query: "document.retrieve",
+    document_query: "document.query",
     index_document: "document.index",
     search_kb: "knowledge.query",
   };
