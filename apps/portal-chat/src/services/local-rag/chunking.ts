@@ -1,5 +1,8 @@
 import { DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE } from "./types.js";
 
+export const COMMON_RAG_SCOPE = "browser-common";
+export const RAG_SCOPE_SEPARATOR = "::";
+
 /**
  * Chunking determinista y agnóstico al idioma. El texto OCR ya normalizado se
  * corta por palabras para no partir UTF-16 en mitad de un carácter.
@@ -26,5 +29,7 @@ export function chunkText(
 }
 
 export function scopeKey(conversationId: string, documentId?: string): string {
-  return documentId ? `${conversationId}\u0000${documentId}` : conversationId;
+  // NUL no es seguro para leer scope_key desde SQLite: el motor lo trata como
+  // terminador de la cadena y trunca los ámbitos al hacer SELECT.
+  return documentId ? `${conversationId}${RAG_SCOPE_SEPARATOR}${documentId}` : conversationId;
 }

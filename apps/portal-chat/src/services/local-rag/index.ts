@@ -10,7 +10,7 @@ import type {
 } from "./types.js";
 
 export type { LocalRagChunk, LocalRagDocument, LocalRagIndexResult, LocalRagQuery, LocalRagStatus } from "./types.js";
-export { chunkText, scopeKey } from "./chunking.js";
+export { COMMON_RAG_SCOPE, RAG_SCOPE_SEPARATOR, chunkText, scopeKey } from "./chunking.js";
 
 interface Pending<T> {
   resolve: (value: T) => void;
@@ -57,6 +57,10 @@ export class LocalRagStore {
 
   deleteConversation(conversationId: string): Promise<LocalRagIndexResult> {
     return this.send<LocalRagIndexResult>({ type: "delete-conversation", conversationId });
+  }
+
+  clear(): Promise<LocalRagIndexResult> {
+    return this.send<LocalRagIndexResult>({ type: "clear" });
   }
 
   close(): void {

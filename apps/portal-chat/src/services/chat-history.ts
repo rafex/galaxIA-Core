@@ -1,4 +1,4 @@
-import type { ChatConversation, ChatMessage } from "../types/fhs.js";
+import type { ChatConversation, ChatMessage, RagMode } from "../types/fhs.js";
 
 export const CHAT_HISTORY_STORAGE_KEY = "fhs.chat.history.v1";
 export const CHAT_HISTORY_SCHEMA_VERSION = 1;
@@ -36,8 +36,8 @@ export function saveChatHistory(history: ChatHistory, storage: Storage = window.
   }
 }
 
-export function createConversation(now = Date.now(), id = crypto.randomUUID()): ChatConversation {
-  return { id, title: "Nueva conversación", createdAt: now, updatedAt: now, messages: [] };
+export function createConversation(now = Date.now(), id = crypto.randomUUID(), ragMode: RagMode = "common"): ChatConversation {
+  return { id, title: "Nueva conversación", createdAt: now, updatedAt: now, ragMode, messages: [] };
 }
 
 export function deriveConversationTitle(messages: ChatMessage[]): string {
@@ -51,6 +51,7 @@ export function upsertConversation(history: ChatHistory, conversation: ChatConve
   const conversations = history.conversations.filter((item) => item.id !== conversation.id);
   conversations.push({
     ...conversation,
+    ragMode: normalizeRagMode(conversation.ragMode),
     title: deriveConversationTitle(conversation.messages),
     updatedAt: conversation.updatedAt,
     messages: conversation.messages.slice(-MAX_MESSAGES_PER_CONVERSATION),
@@ -93,6 +94,7 @@ function trimHistory(history: ChatHistory): ChatHistory {
       .slice(0, MAX_CONVERSATIONS)
       .map((conversation) => ({
         ...conversation,
+        ragMode: normalizeRagMode(conversation.ragMode),
         messages: conversation.messages.slice(-MAX_MESSAGES_PER_CONVERSATION),
       })),
   };
@@ -113,8 +115,13 @@ function isChatConversation(value: unknown): value is ChatConversation {
     typeof candidate.title === "string" &&
     typeof candidate.createdAt === "number" &&
     typeof candidate.updatedAt === "number" &&
+    (candidate.ragMode === undefined || candidate.ragMode === "common" || candidate.ragMode === "independent") &&
     Array.isArray(candidate.messages) &&
     candidate.messages.every(isChatMessage);
+}
+
+function normalizeRagMode(mode: RagMode | undefined): RagMode {
+  return mode === "independent" ? "independent" : "common";
 }
 
 function isChatMessage(value: unknown): value is ChatMessage {

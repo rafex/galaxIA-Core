@@ -1,4 +1,4 @@
-import type { AgentEvent, ChatConversation, ChatMessage, ChatState, KbCitation, ProvenanceInfo } from "../types/fhs.js";
+import type { AgentEvent, ChatConversation, ChatMessage, ChatState, KbCitation, ProvenanceInfo, RagMode } from "../types/fhs.js";
 import {
   connectToChat,
   type ApiOptions,
@@ -21,7 +21,7 @@ import { applyTheme, cycleTheme, getCurrentTheme, getInitialTheme, themeLabel } 
 import { createDrawerGroup } from "./drawer.js";
 import { initTooltips, refreshTooltip } from "./tooltip.js";
 import { createTour, hasTourRun, type TourStep } from "./tour.js";
-import { LocalRagStore, type LocalRagChunk } from "../services/local-rag/index.js";
+import { COMMON_RAG_SCOPE, LocalRagStore, type LocalRagChunk } from "../services/local-rag/index.js";
 
 interface RetryPayload {
   message: string;
@@ -50,6 +50,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   let conversationId: string | null = null;
   let historyConversationId: string | null = null;
   let chatHistory: ChatHistory = createChatHistory();
+  let pendingConversationRagMode: RagMode = "common";
   let responseStartedAt: number | null = null;
   let responseMessageId: string | null = null;
   let pendingMessageId: string | null = null;
@@ -116,6 +117,28 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         <ul class="conversation-list"></ul>
         <button type="button" class="clear-history-btn">Borrar historial local</button>
       </aside>
+      <div class="conversation-rag-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="conversation-rag-title">
+        <div class="conversation-rag-dialog-card">
+          <h2 id="conversation-rag-title">Nueva conversación</h2>
+          <p>¿Cómo quieres que esta conversación use el contexto de documentos?</p>
+          <fieldset>
+            <legend>Ámbito del RAG</legend>
+            <label class="rag-mode-option">
+              <input type="radio" name="new-conversation-rag-mode" value="common" checked />
+              <span><strong>RAG común</strong><small>Comparte documentos con otras conversaciones comunes de este navegador.</small></span>
+            </label>
+            <label class="rag-mode-option">
+              <input type="radio" name="new-conversation-rag-mode" value="independent" />
+              <span><strong>RAG independiente</strong><small>Mantiene los documentos aislados en esta conversación.</small></span>
+            </label>
+          </fieldset>
+          <p class="rag-mode-note">La elección queda fija para esta conversación. Para cambiarla, crea otra.</p>
+          <div class="conversation-rag-dialog-actions">
+            <button type="button" class="rag-dialog-cancel">Cancelar</button>
+            <button type="button" class="rag-dialog-create">Crear conversación</button>
+          </div>
+        </div>
+      </div>
       <main class="chat-area">
         <div class="messages"></div>
         <div class="composer">
@@ -200,6 +223,9 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   const activityLogEl = container.querySelector(".activity-log") as HTMLElement;
   const conversationListEl = container.querySelector(".conversation-list") as HTMLElement;
   const newConversationBtn = container.querySelector(".new-conversation-btn") as HTMLButtonElement;
+  const ragDialog = container.querySelector(".conversation-rag-dialog") as HTMLDivElement;
+  const ragDialogCancel = container.querySelector(".rag-dialog-cancel") as HTMLButtonElement;
+  const ragDialogCreate = container.querySelector(".rag-dialog-create") as HTMLButtonElement;
   const clearHistoryBtn = container.querySelector(".clear-history-btn") as HTMLButtonElement;
   const modelSelector = container.querySelector(".model-selector") as HTMLSelectElement;
   const scopeSelector = container.querySelector(".scope-selector") as HTMLSelectElement;
@@ -363,14 +389,23 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   newConversationBtn.addEventListener("click", () => {
     if (state.isStreaming) return;
-    startNewConversation();
+    openNewConversationDialog();
+  });
+
+  ragDialogCancel.addEventListener("click", closeNewConversationDialog);
+  ragDialogCreate.addEventListener("click", () => {
+    const selected = container.querySelector<HTMLInputElement>('input[name="new-conversation-rag-mode"]:checked');
+    startNewConversation(selected?.value === "independent" ? "independent" : "common");
+    closeNewConversationDialog();
+  });
+  ragDialog.addEventListener("click", (event) => {
+    if (event.target === ragDialog) closeNewConversationDialog();
   });
 
   clearHistoryBtn.addEventListener("click", () => {
     if (!window.confirm("¿Borrar todas las conversaciones guardadas en este navegador?")) return;
-    const conversationIds = chatHistory.conversations.map((conversation) => conversation.id);
     if (localRag) {
-      void Promise.all(conversationIds.map((id) => localRag.deleteConversation(id))).catch(() => {
+      void localRag.clear().catch(() => {
         addActivityItem("warning", "No se pudo limpiar todo el índice RAG local.");
       });
     }
@@ -401,16 +436,36 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     chatHistory = loadChatHistory();
     const active = chatHistory.conversations[0];
     historyConversationId = active?.id ?? null;
+    pendingConversationRagMode = active?.ragMode ?? "common";
     state.messages = active ? [...active.messages] : [];
     renderConversationList();
     renderMessages();
   }
 
-  function startNewConversation() {
+  function openNewConversationDialog() {
+    ragDialog.hidden = false;
+    const commonOption = container.querySelector<HTMLInputElement>('input[name="new-conversation-rag-mode"][value="common"]');
+    const independentOption = container.querySelector<HTMLInputElement>('input[name="new-conversation-rag-mode"][value="independent"]');
+    if (pendingConversationRagMode === "independent") {
+      if (commonOption) commonOption.checked = false;
+      if (independentOption) independentOption.checked = true;
+    } else {
+      if (commonOption) commonOption.checked = true;
+      if (independentOption) independentOption.checked = false;
+    }
+    (pendingConversationRagMode === "independent" ? independentOption : commonOption)?.focus();
+  }
+
+  function closeNewConversationDialog() {
+    ragDialog.hidden = true;
+  }
+
+  function startNewConversation(ragMode: RagMode = "common") {
     chatConnection?.close();
     chatConnection = null;
     conversationId = null;
     historyConversationId = null;
+    pendingConversationRagMode = ragMode;
     responseStartedAt = null;
     responseMessageId = null;
     pendingMessageId = null;
@@ -436,6 +491,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     chatConnection = null;
     conversationId = null;
     historyConversationId = selected.id;
+    pendingConversationRagMode = selected.ragMode;
     responseStartedAt = null;
     responseMessageId = null;
     pendingMessageId = null;
@@ -498,11 +554,11 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       ? chatHistory.conversations.find((conversation) => conversation.id === historyConversationId)
       : undefined;
     if (active) return active;
-    const created = createConversation();
-    historyConversationId = created.id;
-    chatHistory = upsertConversation(chatHistory, created);
+    const conversation = createConversation(Date.now(), undefined, pendingConversationRagMode);
+    historyConversationId = conversation.id;
+    chatHistory = upsertConversation(chatHistory, conversation);
     saveChatHistory(chatHistory);
-    return created;
+    return conversation;
   }
 
   function persistActiveConversation() {
@@ -523,14 +579,20 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       item.setAttribute("role", "button");
       item.setAttribute("aria-label", `Abrir ${conversation.title}`);
 
+      const details = document.createElement("span");
+      details.className = "conversation-details";
       const title = document.createElement("span");
       title.className = "conversation-title";
       title.textContent = conversation.title;
+      const ragMode = document.createElement("small");
+      ragMode.className = "conversation-rag-mode";
+      ragMode.textContent = conversation.ragMode === "common" ? "RAG común" : "RAG independiente";
+      details.append(title, ragMode);
       const time = document.createElement("time");
       time.className = "conversation-time";
       time.dateTime = new Date(conversation.updatedAt).toISOString();
       time.textContent = formatMessageTime(conversation.updatedAt);
-      item.append(title, time);
+      item.append(details, time);
 
       item.addEventListener("click", () => selectConversation(conversation.id));
       item.addEventListener("keydown", (event) => {
@@ -758,6 +820,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     try {
       const chunks = await localRag.query({
         conversationId: conversation.id,
+        ragScope: conversationRagScope(conversation),
         documentId: payload.documentId,
         query: payload.message,
         topK: 4,
@@ -824,7 +887,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         addOcrExtractedMessage(event.data.filename, text);
         if (localRag) {
           const conversation = ensureHistoryConversation();
-          void localRag.index({ conversationId: conversation.id, documentId, filename: event.data.filename, text })
+          void localRag.index({ conversationId: conversation.id, ragScope: conversationRagScope(conversation), documentId, filename: event.data.filename, text })
             .then((result) => addActivityItem("success", `RAG local: ${result.chunksIndexed} fragmentos indexados (${result.backend}).`))
             .catch((error: unknown) => addActivityItem("warning", `No se pudo indexar localmente el documento: ${error instanceof Error ? error.message : String(error)}`));
         }
@@ -866,6 +929,10 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         sendBtn.disabled = false;
         break;
     }
+  }
+
+  function conversationRagScope(conversation: ChatConversation): string {
+    return conversation.ragMode === "common" ? COMMON_RAG_SCOPE : conversation.id;
   }
 
   function addMessage(message: ChatMessage) {

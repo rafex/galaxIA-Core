@@ -350,6 +350,18 @@ input {
   white-space: nowrap;
 }
 
+.conversation-details {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.conversation-rag-mode {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+}
+
 .conversation-time {
   color: var(--text-muted);
   font-size: 0.7rem;
@@ -362,6 +374,95 @@ input {
   padding: 0.45rem 0.625rem;
   color: var(--text-muted);
   font-size: 0.75rem;
+}
+
+.conversation-rag-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 45%);
+}
+
+.conversation-rag-dialog[hidden] {
+  display: none;
+}
+
+.conversation-rag-dialog-card {
+  width: min(32rem, 100%);
+  padding: 1.25rem;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 40%);
+}
+
+.conversation-rag-dialog-card h2 {
+  margin-top: 0;
+}
+
+.conversation-rag-dialog-card fieldset {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1rem 0;
+  padding: 0;
+  border: 0;
+}
+
+.conversation-rag-dialog-card legend {
+  margin-bottom: 0.4rem;
+  font-weight: 700;
+}
+
+.rag-mode-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.rag-mode-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.rag-mode-option span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.rag-mode-option small,
+.rag-mode-note {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.conversation-rag-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.conversation-rag-dialog-actions button {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.55rem 0.8rem;
+  background: var(--surface-hover);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.conversation-rag-dialog-actions .rag-dialog-create {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 
 /* ── Chat ─────────────────────────────────────────────────────────────── */

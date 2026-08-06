@@ -6,6 +6,7 @@ export const DEFAULT_CHUNK_OVERLAP = 120;
 
 export interface LocalRagDocument {
   conversationId: string;
+  ragScope: string;
   documentId: string;
   filename: string;
   text: string;
@@ -13,6 +14,7 @@ export interface LocalRagDocument {
 
 export interface LocalRagQuery {
   conversationId: string;
+  ragScope: string;
   documentId?: string;
   query: string;
   topK?: number;
@@ -46,12 +48,14 @@ export interface LocalRagStatus {
 export type LocalRagRequestPayload =
   | { type: "index"; document: LocalRagDocument }
   | { type: "query"; query: LocalRagQuery }
-  | { type: "delete-conversation"; conversationId: string };
+  | { type: "delete-conversation"; conversationId: string }
+  | { type: "clear" };
 
 export type LocalRagRequest =
   | { type: "index"; requestId: string; document: LocalRagDocument }
   | { type: "query"; requestId: string; query: LocalRagQuery }
-  | { type: "delete-conversation"; requestId: string; conversationId: string };
+  | { type: "delete-conversation"; requestId: string; conversationId: string }
+  | { type: "clear"; requestId: string };
 
 export type LocalRagResponse =
   | { type: "result"; requestId: string; value: LocalRagIndexResult | LocalRagChunk[] }

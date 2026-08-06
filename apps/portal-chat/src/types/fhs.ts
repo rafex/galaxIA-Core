@@ -21,14 +21,17 @@ export type ChatMessage =
       createdAt: number;
       completedAt?: number;
       durationMs?: number;
-      provenance?: ProvenanceInfo;
-    };
+    provenance?: ProvenanceInfo;
+  };
+
+export type RagMode = "common" | "independent";
 
 export interface ChatConversation {
   id: string;
   title: string;
   createdAt: number;
   updatedAt: number;
+  ragMode: RagMode;
   messages: ChatMessage[];
 }
 

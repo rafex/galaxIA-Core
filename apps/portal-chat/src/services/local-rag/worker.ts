@@ -1,6 +1,6 @@
 import { pipeline, type FeatureExtractionPipeline } from "@huggingface/transformers";
 import sqlite3InitModule from "sqlite-wasm-vec";
-import { chunkText, scopeKey } from "./chunking.js";
+import { chunkText, RAG_SCOPE_SEPARATOR, scopeKey } from "./chunking.js";
 import {
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CHUNK_SIZE,
@@ -71,6 +71,9 @@ async function handleRequest(request: LocalRagRequest): Promise<void> {
     } else if (request.type === "query") {
       const value = await queryDocument(request.query);
       post({ type: "result", requestId: request.requestId, value });
+    } else if (request.type === "clear") {
+      const value = await clearIndex();
+      post({ type: "result", requestId: request.requestId, value });
     } else {
       const value = await deleteConversation(request.conversationId);
       post({ type: "result", requestId: request.requestId, value });
@@ -86,7 +89,7 @@ async function indexDocument(document: LocalRagDocument): Promise<LocalRagIndexR
   post({ type: "status", status: { phase: "loading-embedding-model", detail: DEFAULT_EMBEDDING_MODEL } });
   const vectors = await embed(chunks);
   post({ type: "status", status: { phase: "indexing", detail: `${chunks.length} fragmentos` } });
-  const key = scopeKey(document.conversationId, document.documentId);
+  const key = scopeKey(document.ragScope, document.documentId);
   await ensureSqlite();
   if (db) {
     await indexSqlite(document, key, chunks, vectors);
@@ -100,7 +103,7 @@ async function queryDocument(request: LocalRagQuery): Promise<LocalRagChunk[]> {
   post({ type: "status", status: { phase: "loading-embedding-model", detail: DEFAULT_EMBEDDING_MODEL } });
   const [queryVector] = await embed([request.query]);
   post({ type: "status", status: { phase: "querying", detail: `top-${request.topK ?? DEFAULT_TOP_K}` } });
-  const key = scopeKey(request.conversationId, request.documentId);
+  const key = scopeKey(request.ragScope, request.documentId);
   await ensureSqlite();
   if (db) return querySqlite(request, key, queryVector);
   return queryIndexedDb(request, key, queryVector);
@@ -194,16 +197,16 @@ function querySqlite(request: LocalRagQuery, key: string, queryVector: Float32Ar
   if (!db) return [];
   const scopes = request.documentId
     ? [key]
-    : db.selectArrays("SELECT DISTINCT scope_key FROM rag_chunks WHERE conversation_id = ?", [request.conversationId])
+    : db.selectArrays("SELECT DISTINCT scope_key FROM rag_chunks")
       .flatMap((row) => typeof row[0] === "string" ? [row[0]] : []);
   const chunks = scopes.flatMap((scope) => {
     const rows = db?.selectArrays("SELECT rowid, distance FROM rag_embeddings WHERE embedding MATCH ? AND scope_key = ? ORDER BY distance LIMIT ?", [toArrayBuffer(queryVector), scope, request.topK ?? DEFAULT_TOP_K]) ?? [];
     return rows.flatMap((row) => {
       const vectorId = row[0];
       if (typeof vectorId !== "number") return [];
-      const chunk = db?.selectArrays("SELECT id, conversation_id, document_id, filename, chunk_index, text, embedding_model, embedding_dimensions FROM rag_chunks WHERE vector_id = ?", [vectorId])[0];
-      if (!chunk || (request.documentId && String(chunk[2]) !== request.documentId)) return [];
-      return [{ id: String(chunk[0]), conversationId: String(chunk[1]), documentId: String(chunk[2]), filename: String(chunk[3]), chunkIndex: Number(chunk[4]), text: String(chunk[5]), score: 1 - Number(row[1]), embeddingModel: String(chunk[6]), embeddingDimensions: Number(chunk[7]) }];
+      const chunk = db?.selectArrays("SELECT id, scope_key, conversation_id, document_id, filename, chunk_index, text, embedding_model, embedding_dimensions FROM rag_chunks WHERE vector_id = ?", [vectorId])[0];
+      if (!chunk || (request.documentId && String(chunk[3]) !== request.documentId) || (!request.documentId && !String(chunk[1]).startsWith(`${request.ragScope}${RAG_SCOPE_SEPARATOR}`))) return [];
+      return [{ id: String(chunk[0]), conversationId: String(chunk[2]), documentId: String(chunk[3]), filename: String(chunk[4]), chunkIndex: Number(chunk[5]), text: String(chunk[6]), score: 1 - Number(row[1]), embeddingModel: String(chunk[7]), embeddingDimensions: Number(chunk[8]) }];
     });
   });
   return chunks.sort((left, right) => right.score - left.score).slice(0, request.topK ?? DEFAULT_TOP_K);
@@ -225,7 +228,7 @@ async function queryIndexedDb(request: LocalRagQuery, key: string, queryVector: 
   const database = await openIndexedDb();
   const records = request.documentId
     ? await readIndexedDbScope(database, key)
-    : await readIndexedDbConversation(database, request.conversationId);
+    : await readIndexedDbRagScope(database, request.ragScope);
   return records.map((record) => ({ record, score: cosine(queryVector, new Float32Array(record.embedding)) }))
     .sort((left, right) => right.score - left.score)
     .slice(0, request.topK ?? DEFAULT_TOP_K)
@@ -238,11 +241,24 @@ async function deleteConversation(conversationId: string): Promise<LocalRagIndex
     const statement = db.prepare("DELETE FROM rag_chunks WHERE conversation_id = ?");
     try { statement.bind([conversationId]).stepReset(); } finally { statement.finalize(); }
     const vectors = db.prepare("DELETE FROM rag_embeddings WHERE scope_key LIKE ?");
-    try { vectors.bind([`${conversationId}\u0000%`]).stepReset(); } finally { vectors.finalize(); }
+    try { vectors.bind([`${conversationId}${RAG_SCOPE_SEPARATOR}%`]).stepReset(); } finally { vectors.finalize(); }
     return { documentId: "", chunksIndexed: 0, embeddingModel: DEFAULT_EMBEDDING_MODEL, embeddingDimensions: DEFAULT_EMBEDDING_DIMENSIONS, backend: sqliteBackend };
   }
   const database = await openIndexedDb();
   const records = await readIndexedDbConversation(database, conversationId);
+  await transaction(database, "readwrite", (store) => { for (const record of records) store.delete(record.id); });
+  return { documentId: "", chunksIndexed: 0, embeddingModel: DEFAULT_EMBEDDING_MODEL, embeddingDimensions: DEFAULT_EMBEDDING_DIMENSIONS, backend: sqliteBackend };
+}
+
+async function clearIndex(): Promise<LocalRagIndexResult> {
+  await ensureSqlite();
+  if (db) {
+    db.exec("DELETE FROM rag_embeddings; DELETE FROM rag_chunks;");
+    nextVectorId = 1;
+    return { documentId: "", chunksIndexed: 0, embeddingModel: DEFAULT_EMBEDDING_MODEL, embeddingDimensions: DEFAULT_EMBEDDING_DIMENSIONS, backend: sqliteBackend };
+  }
+  const database = await openIndexedDb();
+  const records = await readIndexedDb(database, () => true);
   await transaction(database, "readwrite", (store) => { for (const record of records) store.delete(record.id); });
   return { documentId: "", chunksIndexed: 0, embeddingModel: DEFAULT_EMBEDDING_MODEL, embeddingDimensions: DEFAULT_EMBEDDING_DIMENSIONS, backend: sqliteBackend };
 }
@@ -298,6 +314,10 @@ async function readIndexedDbScope(database: IndexedDbDatabase, key: string): Pro
 
 async function readIndexedDbConversation(database: IndexedDbDatabase, conversationId: string): Promise<IndexedChunk[]> {
   return readIndexedDb(database, (record) => record.conversationId === conversationId);
+}
+
+async function readIndexedDbRagScope(database: IndexedDbDatabase, ragScope: string): Promise<IndexedChunk[]> {
+  return readIndexedDb(database, (record) => record.scopeKey.startsWith(`${ragScope}${RAG_SCOPE_SEPARATOR}`));
 }
 
 function readIndexedDb(database: IndexedDbDatabase, matches: (record: IndexedChunk) => boolean): Promise<IndexedChunk[]> {
