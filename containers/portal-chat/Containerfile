@@ -2,7 +2,7 @@
 # Sirve la aplicación compilada con Nginx sobre HTTPS; la sesión de chat
 # sale directamente del navegador hacia Navigator por libp2p/WSS.
 
-FROM node:22-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
 ARG COMMIT_HASH=unknown

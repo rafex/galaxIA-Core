@@ -48,3 +48,38 @@ container-ps:
 
 .PHONY: container-restart
 container-restart: container-down container-up
+
+# ── Distribución de imágenes ─────────────────────────────────────────────────
+# Requiere: GITHUB_TOKEN (push), GH_TOKEN (build con paquetes privados)
+# Uso: make images-build [TAG=v0.2.0] [ARCH=linux/amd64,linux/arm64]
+
+IMAGE_TAG  ?= latest
+IMAGE_ARCH ?=
+
+.PHONY: images-build
+images-build:
+	$(call section,Construyendo imágenes (tag=$(IMAGE_TAG)))
+	bash containers/build-images.sh --tag $(IMAGE_TAG) $(if $(IMAGE_ARCH),--arch $(IMAGE_ARCH),)
+	$(call ok,Build completado)
+
+.PHONY: images-push
+images-push:
+	$(call section,Build + push a GHCR (tag=$(IMAGE_TAG)))
+	bash containers/build-images.sh --tag $(IMAGE_TAG) --push $(if $(IMAGE_ARCH),--arch $(IMAGE_ARCH),)
+	$(call ok,Push completado)
+
+.PHONY: images-export
+images-export:
+	$(call section,Exportando imágenes a dist/images/)
+	bash containers/build-images.sh --tag $(IMAGE_TAG) --export
+	$(call ok,Archivos tar.gz en dist/images/)
+
+.PHONY: images-load
+images-load:
+	$(call section,Cargando imágenes en $(HOST))
+	@if [ -z "$(HOST)" ]; then echo "Uso: make images-load HOST=raspi4b"; exit 1; fi
+	@for f in dist/images/*.tar.gz; do \
+	  echo "  → $$f"; \
+	  cat "$$f" | ssh $(HOST) "podman load"; \
+	done
+	$(call ok,Imágenes cargadas en $(HOST))
