@@ -125,10 +125,10 @@ scp dist/images/galaxia-star-latest.tar.gz raspi4b:~
 # En Raspi4B
 podman load < ~/galaxia-star-latest.tar.gz
 podman run -d --name fhs-star \
-  -p 4002:4002 \
+  --network host \
   -v star-data:/data \
   -e FHS_BOOTSTRAP_ADDRS=/ip4/192.168.3.175/tcp/4001/tls/ws \
-  -e LLAMA_CPP_URL=http://169.254.1.2:43110/v1 \
+  -e LLAMA_CPP_URL=http://127.0.0.1:43110/v1 \
   -e TLS_CERT_PATH=/certs/e2e.crt \
   -e TLS_KEY_PATH=/certs/e2e.key \
   -e NODE_EXTRA_CA_CERTS=/certs/e2e.crt \
@@ -136,12 +136,38 @@ podman run -d --name fhs-star \
   ghcr.io/rafex/galaxia-star:latest
 ```
 
+> `--network host` es obligatorio, no opcional — ver la sección **Redes: hairpin NAT** más abajo.
+
 Con Make (scp + podman load automático):
 
 ```bash
 make images-export
 make images-load HOST=raspi4b
 ```
+
+---
+
+## Redes: hairpin NAT en podman rootless
+
+Todos los nodos FHS P2P (`atlas`, `navigator`, `star`, `satellite-ocr`,
+`kb-provider`, `rag-provider`) corren con **`--network host`** (o
+`network_mode: host` en los compose) en vez de publicar puertos con `-p`.
+
+**Por qué:** Atlas siempre anuncia al swarm su IP externa real (la necesitan
+los peers de otros hosts para encontrarlo). En podman rootless
+(pasta/slirp4netns), un contenedor **no puede** alcanzar a otro contenedor
+del **mismo host** marcando esa IP externa publicada — es hairpin NAT, y las
+implementaciones de red rootless no lo soportan. El síntoma es
+`PublishError.NoPeersSubscribedToTopic` sostenido en los logs de GossipSub
+(no un error de TLS, ni de bootstrap: el `podman logs` de Atlas incluso puede
+no mostrar nada raro) — se confirma consultando `curl -sk https://<atlas>:8081/status`:
+los peers del mismo host que Atlas simplemente no aparecen en la lista,
+mientras que los peers de otros hosts sí.
+
+Con `--network host` el contenedor usa la interfaz de red real del host — sin
+NAT de por medio — y el problema desaparece sin importar si el peer termina
+en el mismo host que Atlas o en otro. Detalle completo: `E2E-023` en
+[`historial-incidencias-e2e.md`](historial-incidencias-e2e.md).
 
 ---
 
@@ -180,7 +206,7 @@ bash containers/build-images.sh \
 | `GALAXIA_VERSION` | todos | Tag de la imagen GHCR (`latest` o `v0.x.y`) |
 | `FHS_BOOTSTRAP_ADDRS` | star, navigator, ocr, rag, kb | Multiaddr de Atlas: `/ip4/<IP>/tcp/4001/tls/ws` |
 | `FHS_ANNOUNCE_ADDRS` | star, navigator, ocr | Multiaddr que anuncia al swarm (importante en pasta) |
-| `LLAMA_CPP_URL` | star | URL base de llama-server (`http://host.containers.internal:43110/v1`) |
+| `LLAMA_CPP_URL` | star | URL base de llama-server. Con `--network host`: `http://127.0.0.1:43110/v1` |
 | `TLS_CERT_PATH` / `TLS_KEY_PATH` | todos | Certificado TLS para libp2p WSS |
 | `NODE_EXTRA_CA_CERTS` | todos | CA raíz para que Node confíe en el certificado |
 | `CERTS_DIR` | compose | Directorio local con los certificados a montar en `/certs` |

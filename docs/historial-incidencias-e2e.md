@@ -1,6 +1,6 @@
 # Histórico de incidencias del E2E
 
-Fecha de actualización: 2026-08-05
+Fecha de actualización: 2026-08-30
 Alcance: Portal Chat, Navigator, Atlas y proveedor OCR Satellite Star.
 
 Este documento conserva los fallos observados durante las pruebas E2E de la
@@ -10,18 +10,28 @@ caída de infraestructura borre el contexto del diagnóstico.
 
 ## Estado actual
 
-La Raspberry Pi fue recuperada y el E2E se volvió a levantar el 2026-08-05.
-Atlas (`4001`), Navigator (`4010`), el LLM (`43110`), Satellite OCR (`4003`)
-y Portal HTTPS (`8443`) están activos. Satellite confirmó conexión al
-bootstrap y publicación de su beacon por libp2p. La prueba funcional del
-2026-08-05 ejecutó desde el navegador un PDF, una pregunta inicial y una
-pregunta de seguimiento en el mismo chat; OCR, respuesta del LLM y
-`DocumentContext` pasaron.
+**2026-08-30** — Instalación real desde imágenes de contenedor (Node.js 24,
+`docs/distribucion-imagenes.md`) en topología de 3 hosts físicos: Bastion
+(Atlas + Star + Navigator), Raspi4B (`satellite-ocr`) y una Raspi3B nueva,
+"portal-pi" (`kb-provider` + `rag-provider`). La antigua Laptop
+(MacBook Pro Debian 13) queda dada de baja — el frontend `portal-chat`
+se instalará más adelante en una cuarta máquina todavía no conectada.
 
-El apagado anterior queda registrado como una incidencia de infraestructura:
-desde Bastion se observó `No route to host` hacia `192.168.1.167:4003` y el
-vecino ARP apareció como `FAILED`. Durante ese estado era esperable que
-Navigator informara que no había proveedores OCR disponibles.
+Los 5 nodos P2P confirmaron mesh completo: Atlas reporta `peerCount: 5` en
+`/status` y ninguno de los 5 vuelve a emitir `PublishError.NoPeersSubscribedToTopic`
+tras el primer ciclo de `NodeAdvertise` (ver E2E-021, E2E-022, E2E-023 para
+las tres causas encontradas y corregidas durante esta instalación). Falta la
+verificación E2E de un chat real de punta a punta — Navigator ya no expone
+`/api/chat` por HTTP, solo un stream libp2p/protobuf, así que esa prueba
+depende del frontend pendiente.
+
+El apagado anterior de la Raspberry Pi (2026-08-05) queda registrado como una
+incidencia de infraestructura: desde Bastion se observó `No route to host`
+hacia `192.168.1.167:4003` y el vecino ARP apareció como `FAILED`. Durante ese
+estado era esperable que Navigator informara que no había proveedores OCR
+disponibles. Tras recuperarla, la prueba funcional del 2026-08-05 ejecutó
+desde el navegador un PDF, una pregunta inicial y una pregunta de seguimiento
+en el mismo chat; OCR, respuesta del LLM y `DocumentContext` pasaron.
 
 ## Resumen cronológico
 
@@ -47,6 +57,9 @@ Navigator informara que no había proveedores OCR disponibles.
 | E2E-018 | La vista OCR mostraba botones de confirmación y el texto incluía `type`, `missionId`, `toolCallId` y `result`. | El flujo seguía esperando una decisión humana aunque el prompt ya acompañaba al archivo; además, Navigator exponía el sobre del resultado de herramienta. | OCR se ejecuta automáticamente cuando el adjunto lleva prompt; el texto se guarda temporalmente en el frontend para las siguientes preguntas del mismo chat; la vista solo muestra `result`; se eliminan `Usar documento` y `Descartar`. | Resuelto y verificado en la E2E funcional PDF → pregunta inicial → seguimiento. |
 | E2E-019 | La prueba Playwright no podía pulsar `Enviar` en la pregunta de seguimiento. | El tour de bienvenida aparecía de forma asíncrona y su overlay interceptaba el botón. | La prueba marca `galaxia-tour-completed` solo en su contexto aislado de navegador; no cambia la UX de producción. | Resuelto y verificado. |
 | E2E-020 | El descubrimiento P2P probaba Atlas y las direcciones de Navigator una por una. | El failover secuencial añadía latencia y hacía depender la conexión del orden configurado. | El portal marca todos los bootstraps simultáneamente, conserva las conexiones exitosas en el swarm y marca en paralelo las direcciones firmadas de los Navigators. | Resuelto en código; falta validar con varios Atlas/Navigators activos. |
+| E2E-021 | Build de `apps/navigator` fallaba en limpio con `Property 'chunks' does not exist on type 'DocumentContext'` (y `documentId`, `ragSource`, `RagSource` similares). | `apps/atlas`, `apps/navigator`, `apps/portal-chat` y `apps/portal-tui` seguían fijados en `@rafex_labs/galaxia-fhs-protocol@^0.1.35` mientras el `package.json` raíz ya pedía `^0.1.36` — con el alias `npm:` y rangos distintos por workspace, `npm install` resolvía la versión más baja (0.1.35, sin los campos RAG nuevos) en vez de 0.1.36. | Se alinearon los 4 `package.json` a `^0.1.36` (commit `03aaf0e`); con todos los workspaces en el mismo rango npm resuelve 0.1.36 de forma consistente. | Resuelto y verificado: build limpio de los 4 componentes en Bastion tras el fix. |
+| E2E-022 | `bash containers/build-images.sh` se colgaba indefinidamente en Raspi4B durante `npm install` dentro del contenedor (sin salida, sin error). | UFW en Raspi4B bloqueaba el tráfico de salida del bridge de podman hacia DNS/registry — el build de `satellite-ocr` no podía resolver `registry.npmjs.org` desde dentro del contenedor. | Se reintentó tras confirmar reglas UFW existentes (rango `4000-4100`/`8080-8099` ya cubría los puertos P2P; el problema era saliente, no entrante) — el build nativo en Raspi4B completó en un segundo intento tras reiniciar el proceso en background correctamente detached (`nohup ... < /dev/null &`, ver E2E-014-style de SSH). | Resuelto; imagen `galaxia-satellite-ocr` construida y corriendo. |
+| E2E-023 | `PublishError.NoPeersSubscribedToTopic` sostenido en los logs de GossipSub de Star y Navigator, minutos después del arranque — pero **no** en satellite-ocr/kb-provider/rag-provider (otros hosts). `curl .../status` en Atlas mostraba `peerCount: 3` en vez de 5: faltaban exactamente los dos peers co-ubicados en el mismo host que Atlas. | Hairpin NAT en podman rootless (pasta/slirp4netns): Atlas anuncia al swarm su IP externa real (`192.168.1.139`, necesaria para peers de otros hosts) — un contenedor del **mismo host** no puede dialear esa IP externa publicada de un contenedor hermano; la implementación de red rootless no soporta ese hairpin. | Atlas, Star y Navigator (todos en Bastion) se redesplegaron con `--network host` / `network_mode: host` en vez de publicar puertos con `-p`; esto evita el NAT por completo. Aplicado también en los 4 providers de `galaxIA-satellite-star/containers/compose*.yaml` para cubrir cualquier topología donde terminen co-ubicados con Atlas. | Resuelto y verificado: `peerCount: 5` estable, 0 recurrencias de `NoPeersSubscribedToTopic` en Star/Navigator tras el redeploy. |
 
 ## Detalle de la corrección OCR
 

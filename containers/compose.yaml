@@ -3,11 +3,21 @@
 # Navigator = orquestador P2P: publica OFFER, recibe BID/ASSIGN, abre stream directo.
 # Portal-chat = frontend HTTPS-only; el chat usa libp2p/WSS directamente.
 #
+# network_mode: host en atlas/navigator (E2E-023, docs/historial-incidencias-e2e.md):
+# en podman rootless (pasta/slirp4netns), un contenedor NO puede alcanzar a otro
+# contenedor del MISMO host a través de la IP externa publicada del host
+# (hairpin NAT no soportado). Atlas siempre anuncia su IP externa real al swarm
+# (la necesitan los peers de OTROS hosts) — cualquier peer P2P co-ubicado en el
+# mismo host que Atlas debe usar network_mode: host para poder dialearla. Esto
+# es necesario incluso si Atlas y Navigator solo se comunican "localmente".
+#
 # Orden de arranque:
 #   1. podman-compose up -d atlas          → anotar la multiaddr del log
 #   2. export FHS_BOOTSTRAP_ADDRS=<multiaddr-atlas>
 #   3. podman-compose up -d navigator
 #   4. Providers (galaxIA-satellite-star/containers/compose.yaml) con el mismo FHS_BOOTSTRAP_ADDRS
+#      — si un provider corre en el MISMO host que Atlas, también necesita
+#      network_mode: host (ver comentario arriba).
 
 services:
   atlas:
@@ -15,8 +25,7 @@ services:
       context: ..
       dockerfile: containers/atlas/Containerfile
     container_name: fhs-atlas
-    ports:
-      - "4001:4001"       # libp2p TLS WebSocket (bootstrap)
+    network_mode: host
     environment:
       - PORT=8081
       - HOST=0.0.0.0
@@ -28,8 +37,6 @@ services:
     volumes:
       - atlas-data:/app/apps/atlas/data
       - ${CERTS_DIR:-../certs}:/certs:ro
-    networks:
-      - fhs
     restart: unless-stopped
 
   navigator:
@@ -37,8 +44,7 @@ services:
       context: ..
       dockerfile: containers/navigator/Containerfile
     container_name: fhs-navigator
-    ports:
-      - "4010:4010"       # libp2p TLS WebSocket para navegador
+    network_mode: host
     environment:
       - PORT=8090
       - HOST=0.0.0.0
@@ -55,8 +61,6 @@ services:
       - ${CERTS_DIR:-../certs}:/certs:ro
     depends_on:
       - atlas
-    networks:
-      - fhs
     restart: unless-stopped
 
   portal-chat:
