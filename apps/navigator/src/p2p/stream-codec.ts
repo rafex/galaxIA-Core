@@ -9,6 +9,7 @@ import { decodeEnvelope, encodeEnvelopeFrame } from "@rafex/galaxia-fhs-protocol
 import type { FhsProto } from "@rafex/galaxia-fhs-protocol";
 import type { FhsNode } from "./nav-node.js";
 import { sealEnvelope, verifyEnvelope } from "./p2p-wire.js";
+import { reportDropped } from "./nav-node.js";
 
 export type FhsEnvelope = FhsProto.Envelope;
 
@@ -22,12 +23,17 @@ export async function* decodeStream(stream: FhsNode): AsyncGenerator<FhsEnvelope
   const decoded = lp.decode(stream) as unknown as AsyncIterable<{ slice(): Uint8Array }>;
   for await (const chunk of decoded) {
     const data = chunk.slice();
+    let envelope: FhsEnvelope;
     try {
-      const envelope = decodeEnvelope(data);
-      if (!verifyEnvelope(envelope)) continue;
-      yield envelope;
-    } catch {
-      // ignorar frames malformados
+      envelope = decodeEnvelope(data);
+    } catch (error: unknown) {
+      reportDropped("[stream] frame malformado descartado", error);
+      continue;
     }
+    if (!verifyEnvelope(envelope)) {
+      reportDropped("[stream] frame con firma inválida descartado", `payload ${envelope.payload.case ?? "desconocido"} de ${envelope.sourcePeerId || "origen desconocido"}`);
+      continue;
+    }
+    yield envelope;
   }
 }

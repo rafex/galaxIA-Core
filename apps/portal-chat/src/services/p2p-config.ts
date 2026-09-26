@@ -1,5 +1,6 @@
 import { CODE_P2P, multiaddr } from "@multiformats/multiaddr";
 import { WebSocketsSecure } from "@multiformats/multiaddr-matcher";
+import { errorText, noopDiagnostics, type DiagnosticsSink } from "./diagnostics.js";
 
 /**
  * A bootstrap address is only a way to enter the libp2p swarm.  The remote
@@ -56,15 +57,21 @@ export async function loadBootstrapAddresses(
   envValues: BootstrapSource[],
   storage: Pick<Storage, "getItem"> | undefined,
   fetcher: typeof fetch = fetch,
+  diag: DiagnosticsSink = noopDiagnostics,
 ): Promise<string[]> {
   let runtimeValue: BootstrapSource;
   let response: Response | undefined;
   try {
     response = await fetcher(`/p2p-config.json?ts=${Date.now()}`, { cache: "no-store" });
-  } catch {
+  } catch (error: unknown) {
     // Vite development and an already-running static server may not have the
     // runtime file. In that case the explicit environment/storage sources are
-    // still valid bootstrap configuration.
+    // still valid bootstrap configuration — pero queda registrado.
+    diag.record({ stage: "config", ok: false, message: `No se pudo leer /p2p-config.json (${errorText(error)}); se usan env/localStorage` });
+  }
+
+  if (response && !response.ok) {
+    diag.record({ stage: "config", ok: false, message: `/p2p-config.json respondió HTTP ${response.status}; se usan env/localStorage` });
   }
 
   if (response?.ok) {
@@ -84,5 +91,11 @@ export async function loadBootstrapAddresses(
     runtimeValue = config.bootstrapAddrs;
   }
 
+  const stored = storage?.getItem(FHS_BOOTSTRAP_STORAGE_KEY);
+  if (stored?.trim()) {
+    // Un override viejo en este navegador se suma a la configuración del
+    // servidor sin avisar; en una laptop que viene de otra red es sospechoso.
+    diag.record({ stage: "config", ok: true, message: `Se suma bootstrap guardado en localStorage (${FHS_BOOTSTRAP_STORAGE_KEY}): ${stored.trim()}` });
+  }
   return resolveBootstrapAddresses([runtimeValue, ...envValues], storage);
 }

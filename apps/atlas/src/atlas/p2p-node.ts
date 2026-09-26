@@ -10,7 +10,7 @@
  * directamente conectados entre sí (solo el nodo suscrito recibe el mensaje).
  */
 
-import { createFhsNode, loadOrCreateFhsIdentity } from "@rafex/galaxia-fhs-node";
+import { consoleDiagLogger, createFhsNode, loadOrCreateFhsIdentity } from "@rafex/galaxia-fhs-node";
 import { readFileSync } from "node:fs";
 import { webSockets } from "@libp2p/websockets";
 import {
@@ -56,6 +56,7 @@ export async function startAtlasNode(config: AtlasP2pConfig) {
     listenAddrs: config.listenAddrs,
     dhtMode: "server",
     transport,
+    logger: consoleDiagLogger("atlas-p2p"),
   });
 
   await node.start();

@@ -9,6 +9,7 @@
 import Fastify from "fastify";
 import { readFileSync } from "node:fs";
 import { FHS_VERSION } from "@rafex/galaxia-fhs-protocol";
+import { nodeStatus } from "@rafex/galaxia-fhs-node";
 import { startAtlasNode } from "./atlas/p2p-node.js";
 import { announceAtlas } from "./atlas/mdns-announce.js";
 import versionInfo from "./version.json" with { type: "json" };
@@ -54,10 +55,20 @@ async function main() {
     multiaddrs: node.getMultiaddrs().map((a: { toString(): string }) => a.toString()),
   }));
 
-  app.get("/status", () => ({
-    peers: node.getPeers().map((p: { toString(): string }) => p.toString()),
-    peerCount: node.getPeers().length,
-  }));
+  // peers/peerCount se conservan (los usan scripts de verificación y doctor.sh);
+  // connections y pubsub dicen desde qué dirección llegó cada peer y si la
+  // malla GossipSub de cada tópico tiene miembros.
+  app.get("/status", () => {
+    const status = nodeStatus(node);
+    return {
+      peers: node.getPeers().map((p: { toString(): string }) => p.toString()),
+      peerCount: status.peerCount,
+      did: identity.did,
+      peerId: status.peerId,
+      connections: status.connections,
+      pubsub: status.pubsub,
+    };
+  });
 
   try {
     await app.listen({ port: PORT, host: HOST });

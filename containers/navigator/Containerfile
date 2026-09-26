@@ -39,6 +39,10 @@ RUN export COMMIT_HASH BUILD_DATE && \
 FROM docker.io/library/node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# Errores internos de libp2p (TLS rechazado por un cliente, upgrades entrantes
+# fallidos, dials fallidos) — sin esto se pierden en silencio. Solo nivel
+# error; para depurar a fondo: -e DEBUG='libp2p:*' (muy verboso). Apagar: -e DEBUG=
+ENV DEBUG=libp2p:*:error
 ENV PORT=8090
 ENV HOST=0.0.0.0
 ENV FHS_LISTEN_ADDRS=/ip4/0.0.0.0/tcp/4010/tls/ws

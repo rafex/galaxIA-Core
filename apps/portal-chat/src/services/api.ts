@@ -12,6 +12,7 @@ import {
 import { FHS_STREAM_PROTOCOL } from "@rafex/galaxia-fhs-protocol/constants";
 import { loadBootstrapAddresses } from "./p2p-config.js";
 import { createPortalP2pNode, discoverNavigator, type P2pStream, type PortalP2pNode } from "./p2p-discovery.js";
+import { diagnostics, errorText } from "./diagnostics.js";
 
 export interface ApiOptions {
   conversationId?: string;
@@ -70,6 +71,8 @@ export interface ChatConnectionStatusInfo {
 const MAX_AUTOMATIC_RECONNECT_ATTEMPTS = 5;
 const AUTOMATIC_RECONNECT_BASE_DELAY_MS = 1_000;
 const AUTOMATIC_RECONNECT_MAX_DELAY_MS = 15_000;
+/** Sin límite, un Navigator que no responde dejaba la sesión "conectando" para siempre. */
+const HANDSHAKE_TIMEOUT_MS = 10_000;
 
 type P2pPrivateKey = Awaited<ReturnType<typeof generateKeyPair>>;
 
@@ -88,6 +91,7 @@ export function connectToChat(
   let sourcePeerId = "";
   let opening = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let handshakeTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectAttempt = 0;
   let connectionGeneration = 0;
 
@@ -99,6 +103,8 @@ export function connectToChat(
     const generation = ++connectionGeneration;
     ready = false;
     onStatus?.("connecting", { automatic: reconnectAttempt > 0, attempt: reconnectAttempt });
+    diagnostics.beginAttempt(reconnectAttempt);
+    clearHandshakeTimer();
     const previousNode = node;
     node = undefined;
     stream = undefined;
@@ -110,9 +116,12 @@ export function connectToChat(
       bootstrapAddrs = await loadBootstrapAddresses(
         [import.meta.env.VITE_FHS_BOOTSTRAP_ADDRS as string | undefined],
         typeof localStorage === "undefined" ? undefined : localStorage,
+        fetch,
+        diagnostics,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorText(error);
+      diagnostics.record({ stage: "config", ok: false, message });
       onStatus?.("disconnected", { automatic: false, attempt: reconnectAttempt, message, exhausted: true });
       onEvent({ type: "error", data: { code: "P2P_CONFIG", message } });
       opening = false;
@@ -120,21 +129,33 @@ export function connectToChat(
     }
     if (bootstrapAddrs.length === 0) {
       const message = "Falta FHS_BOOTSTRAP_ADDRS o fhs.bootstrap-addrs";
+      diagnostics.record({ stage: "config", ok: false, message });
       onStatus?.("disconnected", { automatic: false, attempt: reconnectAttempt, message, exhausted: true });
       onEvent({ type: "error", data: { code: "P2P_CONFIG", message } });
       opening = false;
       return;
     }
 
+    diagnostics.record({ stage: "config", ok: true, message: `Bootstrap configurado: ${bootstrapAddrs.join(", ")}` });
+
     try {
       privateKey = await generateKeyPair("Ed25519");
       sourcePeerId = didFromRaw(privateKey.publicKey.raw);
       node = await createPortalP2pNode(privateKey);
-      const discovered = await discoverNavigator(node, bootstrapAddrs);
+      const discovered = await discoverNavigator(node, bootstrapAddrs, undefined, diagnostics);
       const openedStream = await discovered.connection.newStream(FHS_STREAM_PROTOCOL);
       stream = openedStream;
+      diagnostics.record({ stage: "stream", ok: true, message: `Stream ${FHS_STREAM_PROTOCOL} abierto`, target: discovered.multiaddr });
 
       await sendEnvelope(openedStream, makeHandshake(privateKey.publicKey.raw), privateKey);
+      diagnostics.record({ stage: "handshake", ok: true, message: "Handshake enviado; esperando respuesta de Navigator" });
+      handshakeTimer = setTimeout(() => {
+        handshakeTimer = undefined;
+        if (ready || closedByCaller || generation !== connectionGeneration) return;
+        const message = `Navigator no respondió al handshake en ${HANDSHAKE_TIMEOUT_MS / 1_000} s`;
+        diagnostics.record({ stage: "handshake", ok: false, message, target: discovered.multiaddr });
+        handleTransportFailure("P2P_HANDSHAKE_TIMEOUT", message);
+      }, HANDSHAKE_TIMEOUT_MS);
       void readFrames(openedStream, privateKey.publicKey.raw, generation);
     } catch (error) {
       const failedNode = node;
@@ -143,7 +164,7 @@ export function connectToChat(
       privateKey = undefined;
       sourcePeerId = "";
       await failedNode?.stop().catch(() => undefined);
-      handleTransportFailure("P2P_CONNECT", error instanceof Error ? error.message : String(error));
+      handleTransportFailure("P2P_CONNECT", errorText(error));
     } finally {
       opening = false;
     }
@@ -163,7 +184,10 @@ export function connectToChat(
           try {
             const decoded = decodeEnvelopeFrame(buffer);
             buffer = buffer.slice(decoded.bytesConsumed);
-            if (!await verifyEnvelope(decoded.envelope, publicKey)) continue;
+            if (!await verifyEnvelope(decoded.envelope, publicKey)) {
+              diagnostics.record({ stage: "stream", ok: false, message: `Se descartó un mensaje con firma inválida (${decoded.envelope.payload.case ?? "desconocido"})` });
+              continue;
+            }
             handleEnvelope(decoded.envelope, generation);
           } catch (error) {
             if (error instanceof Error && error.message.includes("incompleto")) break;
@@ -171,10 +195,15 @@ export function connectToChat(
           }
         }
       }
-      if (!closedByCaller && generation === connectionGeneration) handleTransportFailure("P2P_CLOSED", "Sesión libp2p cerrada");
+      if (!closedByCaller && generation === connectionGeneration) {
+        diagnostics.record({ stage: "stream", ok: false, message: "Navigator cerró el stream" });
+        handleTransportFailure("P2P_CLOSED", "Sesión libp2p cerrada");
+      }
     } catch (error) {
       if (!closedByCaller && generation === connectionGeneration) {
-        handleTransportFailure("P2P_STREAM", error instanceof Error ? error.message : String(error));
+        const message = errorText(error);
+        diagnostics.record({ stage: "stream", ok: false, message: `Error en el stream: ${message}` });
+        handleTransportFailure("P2P_STREAM", message);
       }
     }
   }
@@ -183,6 +212,7 @@ export function connectToChat(
     if (generation !== connectionGeneration) return;
     switch (envelope.payload.case) {
       case "handshakeAck":
+        diagnostics.record({ stage: "handshake", ok: true, message: "Navigator aceptó la sesión" });
         ready = true;
         reconnectAttempt = 0;
         clearReconnectTimer();
@@ -265,7 +295,7 @@ export function connectToChat(
       }), privateKey);
       await sendChatRequest(options);
     })().catch((error: unknown) => {
-      onEvent({ type: "error", data: { conversationId: sessionId, code: "P2P_SEND", message: error instanceof Error ? error.message : String(error) } });
+      onEvent({ type: "error", data: { conversationId: sessionId, code: "P2P_SEND", message: errorText(error) } });
     });
   }
 
@@ -315,11 +345,23 @@ export function connectToChat(
       clearReconnectTimer();
       ready = false;
       onStatus?.("disconnected");
-      void node?.stop();
+      void node?.stop().catch((error: unknown) => {
+        diagnostics.record({ stage: "session", ok: false, message: `No se pudo detener el nodo libp2p: ${errorText(error)}` });
+      });
     },
   };
 
+  function clearHandshakeTimer(): void {
+    if (handshakeTimer !== undefined) {
+      clearTimeout(handshakeTimer);
+      handshakeTimer = undefined;
+    }
+  }
+
   function clearReconnectTimer(): void {
+    // Se llama al recibir handshakeAck, al reconectar a mano y al cerrar:
+    // en los tres casos el timeout de handshake pendiente ya no aplica.
+    clearHandshakeTimer();
     if (reconnectTimer !== undefined) {
       clearTimeout(reconnectTimer);
       reconnectTimer = undefined;

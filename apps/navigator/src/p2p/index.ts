@@ -17,7 +17,9 @@ import {
   pubsubSubscribe,
   pubsubPublish,
   dhtPut,
+  type FhsNode,
 } from "./nav-node.js";
+import { errorMessage } from "@rafex/galaxia-fhs-node";
 import { configureSigner, dhtBeaconCodec, makeNavigatorBeacon, missionBidCodec, nodeAdvertiseCodec } from "./p2p-wire.js";
 import { P2pAtlasClient } from "./p2p-atlas-client.js";
 import { P2pLlmGateway } from "./p2p-llm-gateway.js";
@@ -43,9 +45,16 @@ export interface P2pProviders {
   mcpHost: McpHost;
 }
 
+/** Proveedores más el estado del nodo, para /health y /status. */
+export interface P2pRuntime extends P2pProviders {
+  node: FhsNode;
+  identity: Awaited<ReturnType<typeof loadOrCreateFhsIdentity>>;
+  peerCache: PeerCache;
+}
+
 const ADVERTISE_INTERVAL_MS = 30_000;
 
-export async function initP2pProviders(config: P2pConfig, eventBus?: import("../events/event-bus.js").EventBus): Promise<P2pProviders> {
+export async function initP2pProviders(config: P2pConfig, eventBus?: import("../events/event-bus.js").EventBus): Promise<P2pRuntime> {
   const identity = await loadOrCreateFhsIdentity(config.identityKeyPath);
   configureSigner(identity.did, identity.privateKey);
   console.log(`[navigator-p2p] DID: ${identity.did}`);
@@ -77,7 +86,10 @@ export async function initP2pProviders(config: P2pConfig, eventBus?: import("../
     fhsVersion: "0.1",
     signature: new Uint8Array(0),
   });
-  await dhtPut(node, `/fhs/beacon/${identity.did}`, beaconPayload, dhtBeaconCodec).catch(() => {});
+  await dhtPut(node, `/fhs/beacon/${identity.did}`, beaconPayload, dhtBeaconCodec).then(
+    () => console.log("[navigator-p2p] beacon DHT publicado"),
+    (error: unknown) => console.warn(`[navigator-p2p] no se pudo publicar el beacon DHT: ${errorMessage(error)} (el portal usará las direcciones del anuncio GossipSub)`),
+  );
 
   const peerCache = new PeerCache();
   const bidCollector = new BidCollector();
@@ -128,5 +140,8 @@ export async function initP2pProviders(config: P2pConfig, eventBus?: import("../
     atlasClient: p2pAtlas,
     llmGateway: p2pLlm,
     mcpHost: p2pMcp,
+    node,
+    identity,
+    peerCache,
   };
 }

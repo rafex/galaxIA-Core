@@ -8,6 +8,7 @@
  */
 
 import { create } from "@bufbuild/protobuf";
+import { errorMessage } from "@rafex/galaxia-fhs-node";
 import {
   FHS_STREAM_PROTOCOL,
   FhsProto,
@@ -35,12 +36,20 @@ export function registerPortalSession(
   eventBus: EventBus,
   providers: P2pProviders,
 ): void {
-  node.handle(FHS_STREAM_PROTOCOL, async (stream: FhsNode) => {
+  node.handle(FHS_STREAM_PROTOCOL, async (stream: FhsNode, connection?: FhsNode) => {
+    const from = connection?.remoteAddr ? String(connection.remoteAddr) : "origen desconocido";
     const messages = decodeStream(stream);
     const first = await messages.next();
-    if (first.done || first.value.payload.case !== "handshake") return;
+    if (first.done || first.value.payload.case !== "handshake") {
+      // Antes se salía en silencio: el navegador quedaba esperando un
+      // handshakeAck que nunca llegaba.
+      console.warn(`[portal-session] stream sin handshake desde ${from} (${first.done ? "cerrado antes del primer mensaje" : `llegó ${first.value.payload.case ?? "desconocido"}`}); se descarta`);
+      return;
+    }
 
     const remoteDid = first.value.sourcePeerId;
+    const openedAt = Date.now();
+    console.log(`[portal-session] sesión abierta: ${remoteDid} desde ${from}`);
     sendEnvelope(stream, newEnvelope({
       sourcePeerId: identity.did,
       destPeerId: remoteDid,
@@ -137,7 +146,10 @@ export function registerPortalSession(
         }
         pendingKbRecommendations.set(id, { message, preferences: currentPreferences, candidates, documentContext, documentId });
         eventBus.emit({ type: "kb.recommended", data: { conversationId: id, candidates, chosenByLlm } });
-      }).catch(() => runChat(id, message, currentPreferences, documentContext, documentId));
+      }).catch((error: unknown) => {
+        console.warn(`[portal-session] no se pudieron resolver bases de conocimiento para ${id}: ${errorMessage(error)}; se responde sin KB`);
+        return runChat(id, message, currentPreferences, documentContext, documentId);
+      });
     };
 
     try {
@@ -222,9 +234,13 @@ export function registerPortalSession(
             break;
         }
       }
+    } catch (error: unknown) {
+      console.warn(`[portal-session] error en la sesión ${remoteDid}: ${errorMessage(error)}`);
+      throw error;
     } finally {
       unsubscribe();
       activeRuntime = undefined;
+      console.log(`[portal-session] sesión cerrada: ${remoteDid} (duró ${Math.round((Date.now() - openedAt) / 1_000)} s)`);
     }
   });
 }

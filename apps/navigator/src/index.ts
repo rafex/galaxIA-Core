@@ -5,6 +5,7 @@ import { FHS_VERSION } from "@rafex/galaxia-fhs-protocol";
 import { EventBus } from "./events/event-bus.js";
 import versionInfo from "./version.json" with { type: "json" };
 import { initP2pProviders } from "./p2p/index.js";
+import { nodeStatus, type DiagNode } from "@rafex/galaxia-fhs-node";
 
 const PORT = Number(process.env.PORT || 8090);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -35,7 +36,7 @@ async function main() {
 
   // FHS solo tiene un camino de descubrimiento y ejecución: libp2p.
   app.log.info("[navigator-p2p] Modo libp2p activo");
-  await initP2pProviders({
+  const p2p = await initP2pProviders({
     identityKeyPath: IDENTITY_KEY_PATH,
     listenAddrs: FHS_LISTEN_ADDRS,
     announceAddrs: FHS_ANNOUNCE_ADDRS,
@@ -44,11 +45,32 @@ async function main() {
     tlsKeyPath: TLS_KEY_PATH,
   }, eventBus);
 
+  const nodeView = p2p.node as DiagNode;
+  const multiaddrs = (): string[] => nodeView.getMultiaddrs().map((address) => address.toString());
+
   app.get("/health", () => ({
     ok: true,
     fhsVersion: FHS_VERSION,
     version: versionInfo.commit,
     buildDate: versionInfo.date,
+    did: p2p.identity.did,
+    multiaddrs: multiaddrs(),
+  }));
+
+  // Qué ve Navigator de la red: conexiones (incluidos navegadores), malla
+  // GossipSub por tópico y providers que se anunciaron. Solo LAN: 8090 no se
+  // expone por el túnel de la demo.
+  app.get("/status", () => ({
+    did: p2p.identity.did,
+    ...nodeStatus(nodeView),
+    knownPeers: p2p.peerCache.all().map((peer) => ({
+      did: peer.did,
+      peerType: peer.peerType,
+      capabilities: peer.capabilities,
+      multiaddrs: peer.multiaddrs,
+      trustLevel: peer.trustLevel,
+      lastSeen: new Date(peer.lastSeen).toISOString(),
+    })),
   }));
 
   try {

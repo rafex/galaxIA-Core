@@ -19,6 +19,8 @@ import {
 } from "../services/chat-history.js";
 import { applyTheme, cycleTheme, getCurrentTheme, getInitialTheme, themeLabel } from "../services/theme.js";
 import { createDrawerGroup } from "./drawer.js";
+import { createDiagnosticsPanel } from "./diagnostics-panel.js";
+import { diagnostics } from "../services/diagnostics.js";
 import { initTooltips, refreshTooltip } from "./tooltip.js";
 import { createTour, hasTourRun, type TourStep } from "./tour.js";
 import { COMMON_RAG_SCOPE, LocalRagStore, type LocalRagChunk } from "../services/local-rag/index.js";
@@ -109,10 +111,12 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         <div class="network-status" data-tooltip="Estado de la conexión con la red comunitaria FHS">
           <span class="status-dot"></span>
           <span>Red: FARO</span>
-          <span class="connection-label">Desconectado</span>
+          <span class="connection-label" role="button" tabindex="0" aria-label="Ver diagnóstico de red">Desconectado</span>
           <span class="version">${version}</span>
           <button class="reconnect-btn" type="button" data-tooltip="Reconectar este chat a la red P2P">↻ Reconectar</button>
         </div>
+        <button type="button" class="icon-btn diag-trigger" aria-label="Diagnóstico de red"
+          data-tooltip="Diagnóstico de red: qué conexiones fallaron y por qué">🩺</button>
         <button type="button" class="icon-btn drawer-trigger" data-drawer-trigger="activity"
           aria-label="Actividad del agente" data-tooltip="Ver qué está haciendo el agente y de dónde viene la respuesta">📊</button>
         <button type="button" class="icon-btn drawer-trigger" data-drawer-trigger="settings"
@@ -236,6 +240,26 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       </footer>
     </div>
     <div class="scrim"></div>
+    <dialog class="diag-dialog" aria-labelledby="diag-title">
+      <div class="diag-head">
+        <h2 id="diag-title">Diagnóstico de red</h2>
+        <button type="button" class="icon-btn diag-close" aria-label="Cerrar diagnóstico">✕</button>
+      </div>
+      <p class="diag-summary" role="status"></p>
+      <h3>Conexiones del navegador</h3>
+      <ul class="diag-endpoints"></ul>
+      <h3>Eventos</h3>
+      <ol class="diag-events"></ol>
+      <div class="diag-actions">
+        <button type="button" class="diag-copy">Copiar diagnóstico</button>
+        <span class="diag-copy-status" role="status"></span>
+      </div>
+      <textarea class="diag-report-fallback" readonly hidden aria-label="Reporte de diagnóstico"></textarea>
+      <p class="diag-note">Por seguridad, el navegador no le dice a la página por qué falló una conexión TLS:
+        un ✗ en un <code>wss://</code> suele ser un certificado no aceptado, un puerto cerrado o un host no
+        alcanzable desde esta red. Para ver el detalle interno de libp2p: en la consola,
+        <code>localStorage.debug = 'libp2p:*'</code> y recargar.</p>
+    </dialog>
   `;
 
   const messagesEl = container.querySelector(".messages") as HTMLElement;
@@ -272,6 +296,23 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   const statusDotEl = container.querySelector(".status-dot") as HTMLElement;
   const connectionLabelEl = container.querySelector(".connection-label") as HTMLElement;
   const reconnectBtn = container.querySelector(".reconnect-btn") as HTMLButtonElement;
+  const diagTriggerBtn = container.querySelector(".diag-trigger") as HTMLButtonElement;
+  const diagnosticsPanel = createDiagnosticsPanel(
+    container.querySelector(".diag-dialog") as HTMLDialogElement,
+    { version },
+  );
+  diagTriggerBtn.addEventListener("click", () => diagnosticsPanel.open());
+  connectionLabelEl.addEventListener("click", () => diagnosticsPanel.open());
+  connectionLabelEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      diagnosticsPanel.open();
+    }
+  });
+  diagnostics.subscribe((entry) => {
+    // Marca el botón mientras el intento actual tenga un fallo sin resolver.
+    if (!entry.ok) diagTriggerBtn.dataset.problem = "true";
+  });
 
   initializeHistory();
   initTooltips(container);
@@ -1045,15 +1086,21 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   let thinkingEl: HTMLElement | null = null;
 
   function updateConnectionStatus(status: ChatConnectionStatus, info?: ChatConnectionStatusInfo) {
+    // El motivo del fallo antes se descartaba aquí: ahora se muestra resumido
+    // y completo en el title; el detalle está en el panel de diagnóstico.
+    const reason = status === "connected" ? "" : info?.message ?? "";
+    const short = reason.length > 70 ? `${reason.slice(0, 69)}…` : reason;
     const labels: Record<ChatConnectionStatus, string> = {
       connecting: info?.retryInMs
-        ? `Reintentando en ${formatDuration(info.retryInMs)}…`
+        ? `Reintentando en ${formatDuration(info.retryInMs)}…${short ? ` — ${short}` : ""}`
         : "Conectando…",
       connected: "Conectado",
-      disconnected: "Desconectado",
+      disconnected: short ? `Desconectado — ${short}` : "Desconectado",
     };
     statusDotEl.dataset.status = status;
     connectionLabelEl.textContent = labels[status];
+    connectionLabelEl.title = reason ? `${reason}\n(clic para ver el diagnóstico)` : "Clic para ver el diagnóstico de red";
+    if (status === "connected") delete diagTriggerBtn.dataset.problem;
     reconnectBtn.hidden = status === "connected";
     reconnectBtn.disabled = status === "connecting";
     reconnectBtn.title = status === "connecting" ? "Conectando con la red P2P…" : "Reconectar este chat a la red P2P";
