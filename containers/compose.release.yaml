@@ -25,6 +25,13 @@
 # en podman rootless (pasta/slirp4netns) un peer P2P no puede alcanzar a otro
 # peer del MISMO host a través de la IP externa publicada del host (hairpin
 # NAT no soportado) — necesario incluso cuando Atlas y Navigator comparten host.
+#
+# restart: always (E2E-024, docs/historial-incidencias-e2e.md de galaxIA-Core):
+# podman-restart.service solo arranca contenedores con restart-policy=always
+# ("podman start --all --filter restart-policy=always"). Con unless-stopped
+# NO vuelven tras reiniciar el host, aunque el servicio esté habilitado.
+# Requiere además, una vez por host: systemctl [--user] enable podman-restart.service
+# (y loginctl enable-linger <usuario> si es rootless).
 
 services:
   atlas:
@@ -42,7 +49,7 @@ services:
     volumes:
       - atlas-data:/app/apps/atlas/data
       - ${CERTS_DIR:-../certs}:/certs:ro
-    restart: unless-stopped
+    restart: always
 
   navigator:
     image: ghcr.io/rafex/galaxia-navigator:${GALAXIA_VERSION:-latest}
@@ -61,7 +68,7 @@ services:
       - ${CERTS_DIR:-../certs}:/certs:ro
     depends_on:
       - atlas
-    restart: unless-stopped
+    restart: always
 
   portal-chat:
     image: ghcr.io/rafex/galaxia-portal-chat:${GALAXIA_VERSION:-latest}
@@ -80,7 +87,7 @@ services:
       - atlas
     networks:
       - fhs
-    restart: unless-stopped
+    restart: always
 
 networks:
   fhs:

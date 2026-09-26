@@ -1,6 +1,6 @@
 # Histórico de incidencias del E2E
 
-Fecha de actualización: 2026-08-30
+Fecha de actualización: 2026-09-26
 Alcance: Portal Chat, Navigator, Atlas y proveedor OCR Satellite Star.
 
 Este documento conserva los fallos observados durante las pruebas E2E de la
@@ -9,6 +9,14 @@ validación. El objetivo es evitar que un mensaje genérico del portal o una
 caída de infraestructura borre el contexto del diagnóstico.
 
 ## Estado actual
+
+**2026-09-26** — Stack completo levantado en la red soberana
+(`192.168.1.0/24`), ya con los 4 hosts y el Mac cliente en la misma red:
+Bastion (Atlas + Navigator + Star + `llama-server`), Raspi4B
+(`satellite-ocr`), Raspi3B (`kb-provider` + `rag-provider`) y la ThinkPad
+(`192.168.1.239`, nueva) como host definitivo de `portal-chat` — reemplaza el
+despliegue temporal en Bastion. Mesh convergido en 12 s (`peerCount: 5`). Se
+corrigió además que nada sobreviviera a un reinicio (E2E-024).
 
 **2026-08-30** — Instalación real desde imágenes de contenedor (Node.js 24,
 `docs/distribucion-imagenes.md`) en topología de 3 hosts físicos: Bastion
@@ -60,6 +68,7 @@ en el mismo chat; OCR, respuesta del LLM y `DocumentContext` pasaron.
 | E2E-021 | Build de `apps/navigator` fallaba en limpio con `Property 'chunks' does not exist on type 'DocumentContext'` (y `documentId`, `ragSource`, `RagSource` similares). | `apps/atlas`, `apps/navigator`, `apps/portal-chat` y `apps/portal-tui` seguían fijados en `@rafex_labs/galaxia-fhs-protocol@^0.1.35` mientras el `package.json` raíz ya pedía `^0.1.36` — con el alias `npm:` y rangos distintos por workspace, `npm install` resolvía la versión más baja (0.1.35, sin los campos RAG nuevos) en vez de 0.1.36. | Se alinearon los 4 `package.json` a `^0.1.36` (commit `03aaf0e`); con todos los workspaces en el mismo rango npm resuelve 0.1.36 de forma consistente. | Resuelto y verificado: build limpio de los 4 componentes en Bastion tras el fix. |
 | E2E-022 | `bash containers/build-images.sh` se colgaba indefinidamente en Raspi4B durante `npm install` dentro del contenedor (sin salida, sin error). | UFW en Raspi4B bloqueaba el tráfico de salida del bridge de podman hacia DNS/registry — el build de `satellite-ocr` no podía resolver `registry.npmjs.org` desde dentro del contenedor. | Se reintentó tras confirmar reglas UFW existentes (rango `4000-4100`/`8080-8099` ya cubría los puertos P2P; el problema era saliente, no entrante) — el build nativo en Raspi4B completó en un segundo intento tras reiniciar el proceso en background correctamente detached (`nohup ... < /dev/null &`, ver E2E-014-style de SSH). | Resuelto; imagen `galaxia-satellite-ocr` construida y corriendo. |
 | E2E-023 | `PublishError.NoPeersSubscribedToTopic` sostenido en los logs de GossipSub de Star y Navigator, minutos después del arranque — pero **no** en satellite-ocr/kb-provider/rag-provider (otros hosts). `curl .../status` en Atlas mostraba `peerCount: 3` en vez de 5: faltaban exactamente los dos peers co-ubicados en el mismo host que Atlas. | Hairpin NAT en podman rootless (pasta/slirp4netns): Atlas anuncia al swarm su IP externa real (`192.168.1.139`, necesaria para peers de otros hosts) — un contenedor del **mismo host** no puede dialear esa IP externa publicada de un contenedor hermano; la implementación de red rootless no soporta ese hairpin. | Atlas, Star y Navigator (todos en Bastion) se redesplegaron con `--network host` / `network_mode: host` en vez de publicar puertos con `-p`; esto evita el NAT por completo. Aplicado también en los 4 providers de `galaxIA-satellite-star/containers/compose*.yaml` para cubrir cualquier topología donde terminen co-ubicados con Atlas. | Resuelto y verificado: `peerCount: 5` estable, 0 recurrencias de `NoPeersSubscribedToTopic` en Star/Navigator tras el redeploy. |
+| E2E-024 | Tras reiniciar Bastion y las Raspis (2026-09-26), **ningún** contenedor `fhs-*` volvió solo: todos en `Exited`, y `llama-server` tampoco corría. | Dos fallas que se suman: (1) `podman-restart.service` estaba deshabilitado; (2) aun habilitado, su `ExecStart` es `podman start --all --filter restart-policy=always`, y todos los contenedores se crearon con `unless-stopped` — nunca serían arrancados. `llama-server` corría con `nohup`, sin supervisor. | `podman update --restart always` en todos los `fhs-*` (sin recrear: se conservan identidades y volúmenes); `systemctl [--user] enable podman-restart.service` en los 4 hosts; `loginctl enable-linger rafex` en la ThinkPad (rootless); `llama-server` como unidad `systemd --user` en Bastion. Los `compose*.yaml` de `galaxIA-Core` y `galaxIA-satellite-star` pasan a `restart: always`. | Resuelto en configuración; pendiente confirmar con un reinicio real de cada host. |
 
 ## Detalle de la corrección OCR
 

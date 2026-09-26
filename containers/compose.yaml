@@ -11,6 +11,13 @@
 # mismo host que Atlas debe usar network_mode: host para poder dialearla. Esto
 # es necesario incluso si Atlas y Navigator solo se comunican "localmente".
 #
+# restart: always (E2E-024, docs/historial-incidencias-e2e.md de galaxIA-Core):
+# podman-restart.service solo arranca contenedores con restart-policy=always
+# ("podman start --all --filter restart-policy=always"). Con unless-stopped
+# NO vuelven tras reiniciar el host, aunque el servicio esté habilitado.
+# Requiere además, una vez por host: systemctl [--user] enable podman-restart.service
+# (y loginctl enable-linger <usuario> si es rootless).
+#
 # Orden de arranque:
 #   1. podman-compose up -d atlas          → anotar la multiaddr del log
 #   2. export FHS_BOOTSTRAP_ADDRS=<multiaddr-atlas>
@@ -37,7 +44,7 @@ services:
     volumes:
       - atlas-data:/app/apps/atlas/data
       - ${CERTS_DIR:-../certs}:/certs:ro
-    restart: unless-stopped
+    restart: always
 
   navigator:
     build:
@@ -61,7 +68,7 @@ services:
       - ${CERTS_DIR:-../certs}:/certs:ro
     depends_on:
       - atlas
-    restart: unless-stopped
+    restart: always
 
   portal-chat:
     build:
@@ -83,7 +90,7 @@ services:
       - atlas
     networks:
       - fhs
-    restart: unless-stopped
+    restart: always
 
 networks:
   fhs:
