@@ -83,6 +83,45 @@ describe("dialBootstraps", () => {
     expect(listeners.has("stop")).toBe(true);
   });
 
+  it("reconnects when the bootstrap drops after connecting (Atlas restarted)", async () => {
+    const atlasPeerId = "12D3KooWL2kvLw4MgPbTTpgKBMsHfVjnpp26AVL54VwWkantYHoL";
+    let dials = 0;
+    const listeners = new Map<string, Set<(event: { detail: unknown }) => void>>();
+    const emit = (type: string, detail: unknown) => {
+      for (const listener of [...(listeners.get(type) ?? [])]) listener({ detail });
+    };
+    const fake: DiagNode = {
+      peerId: { toString: () => "self" },
+      getMultiaddrs: () => [],
+      getPeers: () => [],
+      getConnections: () => [],
+      dial: () => {
+        dials += 1;
+        return Promise.resolve({});
+      },
+      peerStore: { merge: () => Promise.resolve() },
+      addEventListener: (type, listener) => {
+        if (!listeners.has(type)) listeners.set(type, new Set());
+        listeners.get(type)?.add(listener);
+      },
+      removeEventListener: (type, listener) => { listeners.get(type)?.delete(listener); },
+    };
+    const { lines, logger } = capturingLogger();
+
+    const stop = dialBootstraps(fake, [`/ip4/192.168.1.139/tcp/4001/tls/ws/p2p/${atlasPeerId}`], logger, { initialDelayMs: 10, maxDelayMs: 20 });
+    await until(() => (listeners.get("peer:disconnect")?.size ?? 0) === 1);
+    emit("peer:disconnect", "otro-peer");
+    expect(dials).toBe(1);
+    emit("peer:disconnect", atlasPeerId);
+    await until(() => lines.some((line) => line.startsWith("info bootstrap reconectado")));
+
+    expect(dials).toBe(2);
+    expect(lines).toContain(`warn se perdió la conexión con el bootstrap (/ip4/192.168.1.139/tcp/4001/tls/ws/p2p/${atlasPeerId}); reintentando`);
+    await until(() => (listeners.get("peer:disconnect")?.size ?? 0) === 1);
+    stop();
+    expect(listeners.get("peer:disconnect")?.size).toBe(0);
+  });
+
   it("stops retrying when asked", async () => {
     const fake: DiagNode = {
       peerId: { toString: () => "self" },
