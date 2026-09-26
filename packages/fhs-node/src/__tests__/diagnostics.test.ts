@@ -172,6 +172,14 @@ describe("nodeStatus", () => {
 });
 
 describe("errorMessage", () => {
+  it("unwraps the WebSocket ErrorEvent instead of printing [object ErrorEvent]", () => {
+    const refused = Object.assign(new Error("connect ECONNREFUSED 192.168.1.139:4001"), { code: "ECONNREFUSED" });
+    const errorEvent = { type: "error", error: refused, message: refused.message, target: { url: "wss://192.168.1.139:4001" } };
+    expect(errorMessage(errorEvent)).toBe("connect ECONNREFUSED 192.168.1.139:4001");
+    expect(errorMessage({ type: "error", message: "TLS alert", target: { url: "wss://h:4010" } })).toBe("TLS alert (wss://h:4010)");
+    expect(errorMessage({ type: "close" })).toBe('evento "close"');
+  });
+
   it("keeps the system error code and flattens AggregateError", () => {
     const refused = Object.assign(new Error("connect failed"), { code: "ECONNREFUSED" });
     expect(errorMessage(refused)).toBe("connect failed (ECONNREFUSED)");
