@@ -24,7 +24,12 @@ export interface LlmProviderSelection {
 export interface GenerateDispatchResult {
   response: GenerateResponse;
   dispatchMs: number | null;
+  /** DID del Star que ejecutó la misión (puede diferir del seleccionado si no pujó). */
+  providerId?: string;
 }
+
+/** Recibe cada fragmento de texto del Star mientras genera. */
+export type DeltaHandler = (text: string) => void;
 
 /**
  * Contrato común del runtime. El Navigator no implementa un cliente remoto
@@ -36,7 +41,8 @@ export class LlmGateway {
     _selection: LlmProviderSelection,
     _request: GenerateRequest,
     _timeoutMs?: number,
-    _trace?: TraceContext
+    _trace?: TraceContext,
+    _onDelta?: DeltaHandler
   ): Promise<GenerateDispatchResult> {
     return Promise.reject(new Error("FHS requiere modo libp2p: no existe un gateway LLM HTTP/WebSocket"));
   }

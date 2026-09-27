@@ -11,7 +11,7 @@ import type {
   ModelInfo,
   PublishedService,
 } from "@rafex/galaxia-fhs-protocol";
-import { LlmGateway, type LlmProviderSelection, type GenerateDispatchResult } from "../providers/llm-gateway.js";
+import { LlmGateway, type DeltaHandler, type LlmProviderSelection, type GenerateDispatchResult } from "../providers/llm-gateway.js";
 import type { TraceContext } from "../providers/llm-gateway.js";
 import { runMissionCycle } from "./mission-cycle.js";
 import { sendEnvelope, decodeStream } from "./stream-codec.js";
@@ -33,10 +33,11 @@ export class P2pLlmGateway extends LlmGateway {
   }
 
   override async generate(
-    _selection: LlmProviderSelection,
+    selection: LlmProviderSelection,
     request: GenerateRequest,
     timeoutMs?: number,
-    _trace?: TraceContext
+    _trace?: TraceContext,
+    onDelta?: DeltaHandler
   ): Promise<GenerateDispatchResult> {
     const startedAt = Date.now();
 
@@ -48,6 +49,7 @@ export class P2pLlmGateway extends LlmGateway {
       missionType: "chat",
       requiredCapabilities: ["chat"],
       preferredModel: request.model,
+      preferredProviderDid: selection.nodeId,
       bidDeadlineMs: BID_DEADLINE_MS,
     });
 
@@ -105,6 +107,9 @@ export class P2pLlmGateway extends LlmGateway {
 
             if (payload.case === "chatDelta") {
               fullContent += payload.value.delta;
+              // Streaming real hacia el Portal: antes los deltas del Star se
+              // acumulaban y el navegador recibía todo el texto al final.
+              if (payload.value.delta) onDelta?.(payload.value.delta);
               continue;
             }
 
@@ -136,7 +141,7 @@ export class P2pLlmGateway extends LlmGateway {
       provider: "p2p",
     };
 
-    return { response, dispatchMs };
+    return { response, dispatchMs, providerId: bid.providerDid };
   }
 }
 

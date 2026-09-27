@@ -70,7 +70,7 @@ export class P2pMcpHost extends McpHost {
    * A diferencia de McpHost WebSocket, cada callTool abre una nueva misión.
    */
   override async callTool(
-    _providerId: string,
+    providerId: string,
     toolName: string,
     args: Record<string, unknown>,
     timeoutMs?: number,
@@ -90,6 +90,7 @@ export class P2pMcpHost extends McpHost {
       collector: this.bidCollector,
       missionType: "tool_call",
       requiredCapabilities: [capability],
+      preferredProviderDid: providerId,
       bidDeadlineMs: BID_DEADLINE_MS,
     });
 
@@ -169,7 +170,7 @@ export class P2pMcpHost extends McpHost {
       })();
     });
 
-    return { message: resultMessage, dispatchMs };
+    return { message: resultMessage, dispatchMs, providerId: bid.providerDid };
   }
 }
 

@@ -106,6 +106,8 @@ export class AgentRuntime {
   private mcpHost: McpHost;
   private artifacts: string[] = [];
   private lastOcrError: string | undefined;
+  /** Star que ejecutó de verdad, si no fue el seleccionado (ver callLlm). */
+  private executedLlmProviderId: string | undefined;
   private usedTools: Array<{
     capability: string;
     providerId: string;
@@ -479,7 +481,7 @@ export class AgentRuntime {
 
     const startTime = Date.now();
     try {
-      const { message: result, dispatchMs } = await this.mcpHost.callTool(
+      const { message: result, dispatchMs, providerId: executedBy } = await this.mcpHost.callTool(
         queryTool.providerId,
         queryTool.name,
         { query, conversationId: this.conversationId, documentId: documentId ?? "", top_k: topK },
@@ -498,8 +500,7 @@ export class AgentRuntime {
 
       this.usedTools.push({
         capability: queryTool.capabilityId,
-        providerId: queryTool.providerId,
-        providerName: queryTool.providerName,
+        ...executedProvider(queryTool, executedBy),
         toolName: queryTool.name,
       });
       return parsed.chunks
@@ -600,7 +601,7 @@ export class AgentRuntime {
 
     let content: string;
     try {
-      const response = await this.callLlm(llm, messages, undefined, preferences.maxWaitMs);
+      const response = await this.callLlm(llm, messages, undefined, preferences.maxWaitMs, false);
       content = response.message.content || "";
     } catch {
       return null;
@@ -683,7 +684,7 @@ export class AgentRuntime {
 
       const startTime = Date.now();
       try {
-        const { message: result, dispatchMs } = await this.mcpHost.callTool(
+        const { message: result, dispatchMs, providerId: executedBy } = await this.mcpHost.callTool(
           kbTool.providerId,
           kbTool.name,
           { query, top_k: 3 },
@@ -700,8 +701,7 @@ export class AgentRuntime {
         const citations = chunks.map((c) => c.citation).filter((c): c is KbCitation => !!c);
         this.usedTools.push({
           capability: kbTool.capabilityId,
-          providerId: kbTool.providerId,
-          providerName: kbTool.providerName,
+          ...executedProvider(kbTool, executedBy),
           toolName: kbTool.name,
           citations: citations.length > 0 ? citations : undefined,
         });
@@ -775,7 +775,7 @@ export class AgentRuntime {
         ipfsCid = built.ipfsCid;
         ipfsRetention = built.ipfsRetention;
         const args = { file: built.file };
-        const { message: result, dispatchMs } = await this.mcpHost.callTool(
+        const { message: result, dispatchMs, providerId: executedBy } = await this.mcpHost.callTool(
           tool.providerId,
           tool.name,
           args,
@@ -793,8 +793,7 @@ export class AgentRuntime {
         });
         this.usedTools.push({
           capability: tool.capabilityId,
-          providerId: tool.providerId,
-          providerName: tool.providerName,
+          ...executedProvider(tool, executedBy),
           toolName: tool.name,
         });
         if (ipfsCid && ipfsRetention !== "reuse") void unpinFromIpfs(ipfsCid);
@@ -917,7 +916,7 @@ export class AgentRuntime {
         ipfsRetention = built.ipfsRetention;
       }
 
-      const { message: result, dispatchMs } = await this.mcpHost.callTool(
+      const { message: result, dispatchMs, providerId: executedBy } = await this.mcpHost.callTool(
         tool.providerId,
         toolName,
         args,
@@ -935,8 +934,7 @@ export class AgentRuntime {
       });
       this.usedTools.push({
         capability: tool.capabilityId,
-        providerId: tool.providerId,
-        providerName: tool.providerName,
+        ...executedProvider(tool, executedBy),
         toolName,
       });
 
@@ -956,17 +954,31 @@ export class AgentRuntime {
     }
   }
 
+  /**
+   * @param emitAnswer si la respuesta es para el usuario. Las llamadas
+   * internas (p. ej. elegir KB con un JSON) no deben aparecer en el chat.
+   */
   private async callLlm(
     llm: ResolvedLlm,
     messages: LlmMessage[],
     tools?: ToolDefinition[],
-    maxWaitMs?: number
+    maxWaitMs?: number,
+    emitAnswer = true
   ): Promise<{ message: LlmMessage; toolCalls: ToolCall[] }> {
+    // Solo se transmite en vivo cuando no hay tools: si el modelo terminara
+    // pidiendo una tool, el texto a medias ya estaría en el chat.
+    let streamed = false;
+    const onDelta = emitAnswer && (!tools || tools.length === 0)
+      ? (text: string) => {
+          streamed = true;
+          this.emit({ type: "assistant.delta", data: { text } });
+        }
+      : undefined;
     const request: GenerateRequest = {
       model: llm.model.id,
       messages,
       tools,
-      stream: false,
+      stream: Boolean(onDelta),
       temperature: 0.7,
     };
 
@@ -977,7 +989,8 @@ export class AgentRuntime {
         { nodeId: llm.nodeId, providerName: llm.providerName, service: llm.service, model: llm.model },
         request,
         maxWaitMs,
-        { conversationId: this.conversationId, capability: llm.model.id, deviceId: this.deviceId }
+        { conversationId: this.conversationId, capability: llm.model.id, deviceId: this.deviceId },
+        onDelta
       );
     } catch (err) {
       this.atlasClient.recordSample({
@@ -989,14 +1002,20 @@ export class AgentRuntime {
     }
 
     const { response, dispatchMs } = dispatchResult;
+    if (dispatchResult.providerId && dispatchResult.providerId !== llm.nodeId) {
+      // El Star elegido no pujó y ejecutó otro: la procedencia debe nombrar
+      // al que de verdad respondió.
+      this.executedLlmProviderId = dispatchResult.providerId;
+    }
     this.atlasClient.recordSample({
       providerId: llm.nodeId,
       capability: llm.model.id,
       sample: { dispatchMs, totalMs: Date.now() - startTime, success: true, at: Date.now() },
     });
 
-    // Stream el delta si el frontend lo espera
-    if (response.message.content && response.toolCalls.length === 0) {
+    // Respaldo: si el Star no mandó deltas (o había tools), se emite el
+    // texto completo al final, como antes.
+    if (emitAnswer && !streamed && response.message.content && response.toolCalls.length === 0) {
       this.emit({ type: "assistant.delta", data: { text: response.message.content } });
     }
 
@@ -1005,11 +1024,9 @@ export class AgentRuntime {
 
   private buildProvenance(llm: ResolvedLlm): ProvenanceInfo {
     return {
-      llm: {
-        providerId: llm.nodeId,
-        providerName: llm.providerName,
-        model: llm.model.id,
-      },
+      llm: this.executedLlmProviderId
+        ? { providerId: this.executedLlmProviderId, providerName: this.executedLlmProviderId, model: llm.model.id }
+        : { providerId: llm.nodeId, providerName: llm.providerName, model: llm.model.id },
       tools: this.usedTools.map((t) => ({
         capability: t.capability,
         providerId: t.providerId,
@@ -1106,6 +1123,19 @@ function parseDataUrl(dataUrl: string): { base64: string; mimeType: string; exte
   }
   const [, mimeType, base64] = match;
   return { base64, mimeType, extension: EXTENSION_BY_MIME[mimeType] || "bin" };
+}
+
+/**
+ * Proveedor para la procedencia: el que ejecutó la misión si difiere del
+ * solicitado (el solicitado no pujó y ganó otro); si no, el solicitado.
+ */
+function executedProvider(
+  requested: { providerId: string; providerName: string },
+  executedBy: string | undefined,
+): { providerId: string; providerName: string } {
+  return executedBy && executedBy !== requested.providerId
+    ? { providerId: executedBy, providerName: executedBy }
+    : { providerId: requested.providerId, providerName: requested.providerName };
 }
 
 function extractText(result: unknown): string {

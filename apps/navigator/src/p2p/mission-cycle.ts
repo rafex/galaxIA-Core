@@ -24,6 +24,11 @@ export interface MissionCycleOptions {
   missionType: MissionType;
   requiredCapabilities: string[];
   preferredModel?: string;
+  /**
+   * Proveedor que el runtime ya eligió (y anunció en llm.selected /
+   * procedencia). Si pujó, gana él; si no, se toma el mejor bid.
+   */
+  preferredProviderDid?: string;
   bidDeadlineMs?: number;
 }
 
@@ -46,6 +51,7 @@ export async function runMissionCycle(
     missionType,
     requiredCapabilities,
     preferredModel,
+    preferredProviderDid,
     bidDeadlineMs = 2_000,
   } = opts;
 
@@ -75,21 +81,7 @@ export async function runMissionCycle(
 
   if (bids.length === 0) return null;
 
-  // Seleccionar mejor bid: trustLevel → reputationScore → estimatedLatencyMs
-  const TRUST_RANK: Record<string, number> = {
-    delegated: 4,
-    standard: 3,
-    community: 2,
-    unverified: 1,
-  };
-
-  const best = bids.sort((a, b) => {
-    const ta = TRUST_RANK[a.trustLevel] ?? 0;
-    const tb = TRUST_RANK[b.trustLevel] ?? 0;
-    if (ta !== tb) return tb - ta;
-    if (a.reputationScore !== b.reputationScore) return b.reputationScore - a.reputationScore;
-    return a.estimatedLatencyMs - b.estimatedLatencyMs;
-  })[0];
+  const best = selectWinningBid(bids, preferredProviderDid);
 
   // Publicar assign
   const assign = create(FhsProto.MissionAssignMessageSchema, {
@@ -105,4 +97,35 @@ export async function runMissionCycle(
   );
 
   return { missionId, bid: best };
+}
+
+const TRUST_RANK: Record<string, number> = {
+  delegated: 4,
+  standard: 3,
+  community: 2,
+  unverified: 1,
+};
+
+/**
+ * Bid ganador. Antes siempre se tomaba "el mejor" (trustLevel →
+ * reputationScore → estimatedLatencyMs) sin mirar qué proveedor había
+ * elegido el runtime: con varios Stars, llm.selected y la procedencia podían
+ * nombrar a uno y ejecutar otro. Ahora el preferido gana si pujó.
+ */
+export function selectWinningBid<B extends Pick<FhsProto.MissionBidMessage, "providerDid" | "trustLevel" | "reputationScore" | "estimatedLatencyMs">>(
+  bids: B[],
+  preferredProviderDid?: string,
+): B {
+  if (bids.length === 0) throw new Error("selectWinningBid sin bids");
+  const preferred = preferredProviderDid
+    ? bids.find((bid) => bid.providerDid === preferredProviderDid)
+    : undefined;
+  if (preferred) return preferred;
+  return [...bids].sort((a, b) => {
+    const ta = TRUST_RANK[a.trustLevel] ?? 0;
+    const tb = TRUST_RANK[b.trustLevel] ?? 0;
+    if (ta !== tb) return tb - ta;
+    if (a.reputationScore !== b.reputationScore) return b.reputationScore - a.reputationScore;
+    return a.estimatedLatencyMs - b.estimatedLatencyMs;
+  })[0];
 }

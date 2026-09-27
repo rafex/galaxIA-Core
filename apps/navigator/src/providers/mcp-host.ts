@@ -16,6 +16,8 @@ export interface LoadedTool {
 export interface DispatchResult {
   message: unknown;
   dispatchMs: number | null;
+  /** DID del Satellite que ejecutó la misión (puede diferir del solicitado si no pujó). */
+  providerId?: string;
 }
 
 export interface TraceContext {
