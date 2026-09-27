@@ -164,7 +164,9 @@ export function connectToChat(
       privateKey = undefined;
       sourcePeerId = "";
       await failedNode?.stop().catch(() => undefined);
-      handleTransportFailure("P2P_CONNECT", errorText(error));
+      const message = errorText(error);
+      diagnostics.record({ stage: "session", ok: false, message: `No se pudo abrir la sesión: ${message}` });
+      handleTransportFailure("P2P_CONNECT", message);
     } finally {
       opening = false;
     }

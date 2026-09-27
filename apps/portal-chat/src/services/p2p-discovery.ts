@@ -112,6 +112,7 @@ export async function discoverNavigator(
   let otherAdvertises = 0;
   const rejectedReasons = new Set<string>();
   const navigatorDialFailures = new Map<string, string>();
+  let chosenConnection: P2pConnection | undefined;
 
   return new Promise<DiscoveredNavigator>((resolve, reject) => {
     let settled = false;
@@ -179,7 +180,11 @@ export async function discoverNavigator(
       diag.record({ stage: "advertise", ok: true, kind: "navigator", message: "Anuncio de Navigator verificado", target: advertise.did });
 
       const beacon = await readDhtBeacon(node, advertise.did, diag);
-      const addresses = beacon?.multiaddrs.length ? beacon.multiaddrs : advertise.multiaddrs;
+      const announced = beacon?.multiaddrs.length ? beacon.multiaddrs : advertise.multiaddrs;
+      // Con --network host Navigator anuncia todas sus IPs, incluida la de
+      // loopback, que desde otro equipo apunta a la máquina del navegador.
+      const reachable = announced.filter((address) => !isUnreachableLoopback(address));
+      const addresses = reachable.length > 0 ? reachable : announced;
       const peerId = peerIdFromDid(advertise.did);
       await Promise.all(addresses.map(async (rawAddress) => {
         let dialAddress = rawAddress;
@@ -187,9 +192,13 @@ export async function discoverNavigator(
           dialAddress = withPeerId(rawAddress, peerId);
           const connection = await node.dial(multiaddr(dialAddress));
           if (settled) {
-            await connection.close?.();
+            // libp2p reutiliza la conexión existente cuando ya hay una con
+            // ese peer: cerrar "la sobrante" sin comparar cerraba la misma
+            // conexión que se acababa de elegir (E2E-026).
+            if (connection !== chosenConnection) await connection.close?.();
             return;
           }
+          chosenConnection = connection;
           diag.record({ stage: "navigator-dial", ok: true, message: "Conectado a Navigator", target: dialAddress });
           finish(undefined, { connection, did: advertise.did, multiaddr: dialAddress });
         } catch (error: unknown) {

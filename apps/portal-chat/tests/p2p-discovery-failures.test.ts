@@ -86,10 +86,39 @@ describe("portal P2P discovery failures", () => {
     expect((error as Error).message).toContain("Navigator encontrado");
     expect((error as Error).message).toContain("wss://192.168.1.139:4010");
     expect((error as Error).message).not.toContain("127.0.0.1");
+    // La dirección de loopback ni se marca desde otro equipo.
     const failed = log.list().filter((entry) => entry.stage === "navigator-dial" && !entry.ok);
-    expect(failed).toHaveLength(2);
+    expect(failed).toHaveLength(1);
     expect(failed.find((entry) => entry.target?.includes("192.168.1.139"))?.hint).toContain("https://192.168.1.139:4010/");
     expect(log.summary()).toContain("Navigator encontrado");
+  });
+
+  it("keeps the chosen connection when another announced address resolves to the same one (E2E-026)", async () => {
+    // Navigator con --network host anuncia varias IPs alcanzables; libp2p
+    // devuelve la misma conexión para cada dial al mismo peer.
+    const navigator = await signedAdvertise({
+      providerId: "navigator",
+      multiaddrs: [
+        "/ip4/127.0.0.1/tcp/4010/tls/ws",
+        "/ip4/192.168.1.139/tcp/4010/tls/ws",
+        "/ip4/192.168.3.175/tcp/4010/tls/ws",
+      ],
+    });
+    let closed = 0;
+    const dialed: string[] = [];
+    const shared = { newStream: async () => ({}), close: () => { closed += 1; } };
+    const node = fakeNode([navigator.bytes], async (address) => {
+      dialed.push(address);
+      await new Promise((resolve) => setTimeout(resolve, address.includes("192.168.3.175") ? 20 : 1));
+      return shared;
+    });
+
+    const discovered = await discoverNavigator(node, ["/ip4/192.168.1.139/tcp/4001/tls/ws"], 500);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(discovered.connection).toBe(shared);
+    expect(closed).toBe(0);
+    expect(dialed.some((address) => address.includes("127.0.0.1"))).toBe(false);
   });
 
   it("says when only non-Navigator nodes are advertising", async () => {
