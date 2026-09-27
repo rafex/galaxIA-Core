@@ -8,12 +8,12 @@
  * callTool() hace el ciclo completo de misión.
  */
 
-import { multiaddr } from "@multiformats/multiaddr";
 import type { PublishedService } from "@rafex/galaxia-fhs-protocol";
 import { McpHost, type LoadedTool, type DispatchResult, type TraceContext } from "../providers/mcp-host.js";
 import { runMissionCycle } from "./mission-cycle.js";
 import { sendEnvelope, decodeStream } from "./stream-codec.js";
-import type { FhsNode, FhsIdentity, BidCollector, PeerCache } from "./nav-node.js";
+import type { FhsNode, FhsIdentity, BidCollector, PeerCache, ProviderDialer } from "./nav-node.js";
+import { dialProvider } from "./nav-node.js";
 import { dynamicValueToUnknown, makeHandshakeEnvelope, makeToolCallEnvelope } from "./p2p-wire.js";
 import { FHS_STREAM_PROTOCOL } from "./fhs-p2p-types.js";
 
@@ -98,13 +98,8 @@ export class P2pMcpHost extends McpHost {
     const { missionId, bid } = result;
 
     // 2. Abrir stream directo al Satellite asignado
-    const peerAddr = bid.providerMultiaddrs[0];
-    if (!peerAddr) {
-      throw new Error(`P2P: Satellite ${bid.providerDid} sin multiaddrs`);
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
-    const conn = await this.navNode.dial(multiaddr(peerAddr) as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const conn = await dialProvider<any>(this.navNode as ProviderDialer, bid.providerDid, bid.providerMultiaddrs);
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
     const stream = await conn.newStream(FHS_STREAM_PROTOCOL);
 

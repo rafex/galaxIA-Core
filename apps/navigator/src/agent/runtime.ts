@@ -36,6 +36,7 @@ import {
   unpinFromIpfs,
   uploadToIpfs,
 } from "../ipfs/ipfs-client.js";
+import { errorMessage } from "@rafex/galaxia-fhs-node";
 
 export interface ModelPreferences {
   model?: string;
@@ -792,7 +793,7 @@ export class AgentRuntime {
         return textResult;
       } catch (err) {
         const duration = Date.now() - startTime;
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         this.lastOcrError = message;
         this.emit({ type: "tool.error", data: { name: tool.name, error: message } });
         this.atlasClient.recordSample({
@@ -935,7 +936,7 @@ export class AgentRuntime {
       if (ipfsCid && ipfsRetention !== "reuse") void unpinFromIpfs(ipfsCid);
     } catch (err) {
       const duration = Date.now() - startTime;
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       this.emit({ type: "tool.error", data: { name: toolName, error: message } });
       this.atlasClient.recordSample({
         providerId: tool.providerId,

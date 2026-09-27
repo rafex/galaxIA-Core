@@ -19,6 +19,7 @@ import {
 } from "@libp2p/crypto/keys";
 import { peerIdFromPrivateKey } from "@libp2p/peer-id";
 import { attachNodeDiagnostics, consoleDiagLogger, dialBootstraps, errorMessage, reportDropped, type DiagNode } from "@rafex/galaxia-fhs-node";
+import { multiaddr } from "@multiformats/multiaddr";
 import { base58btc } from "multiformats/bases/base58";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fromString, toString } from "uint8arrays";
@@ -278,6 +279,48 @@ export function pubsubSubscribe<T>(
 }
 
 export { reportDropped };
+
+// ── Dial a un provider asignado ────────────────────────────────────────────────
+
+/** Nodo mínimo para dialProvider (en pruebas se sustituye por un fake). */
+export interface ProviderDialer {
+  dial(address: unknown, options?: { signal?: AbortSignal }): Promise<unknown>;
+}
+
+const PROVIDER_DIAL_TIMEOUT_MS = 5_000;
+
+function isLoopbackMultiaddr(address: string): boolean {
+  const host = /^\/(?:ip4|ip6|dns4|dns6|dns)\/([^/]+)/.exec(address)?.[1] ?? "";
+  return host === "localhost" || host === "::1" || /^127\./.test(host);
+}
+
+/**
+ * Abre la conexión con el provider que ganó la misión probando sus multiaddrs
+ * anunciadas de una en una: primero las de red, la de loopback al final.
+ *
+ * Antes se usaba solo `providerMultiaddrs[0]`. Con `--network host` los
+ * providers anuncian todas sus IPs y la primera suele ser 127.0.0.1, que desde
+ * Navigator apunta a Bastion y no al provider: el OCR de la Raspi4B nunca se
+ * alcanzaba (E2E-027). Con Star "funcionaba" solo porque vive en el mismo host.
+ */
+export async function dialProvider<C = unknown>(
+  node: ProviderDialer,
+  providerDid: string,
+  addresses: string[],
+  timeoutMs = PROVIDER_DIAL_TIMEOUT_MS,
+): Promise<C> {
+  if (addresses.length === 0) throw new Error(`P2P: ${providerDid} no anunció multiaddrs`);
+  const ordered = [...addresses].sort((a, b) => Number(isLoopbackMultiaddr(a)) - Number(isLoopbackMultiaddr(b)));
+  const failures: string[] = [];
+  for (const address of ordered) {
+    try {
+      return await node.dial(multiaddr(address), { signal: AbortSignal.timeout(timeoutMs) }) as C;
+    } catch (error: unknown) {
+      failures.push(`${address} (${errorMessage(error)})`);
+    }
+  }
+  throw new Error(`P2P: no se pudo conectar con ${providerDid}: ${failures.join("; ")}`);
+}
 
 // ── DHT helper ────────────────────────────────────────────────────────────────
 

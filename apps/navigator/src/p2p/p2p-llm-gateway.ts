@@ -5,7 +5,6 @@
  *   offer → bid → assign → stream directo → chat_request → deltas → chat_completed
  */
 
-import { multiaddr } from "@multiformats/multiaddr";
 import type {
   GenerateRequest,
   GenerateResponse,
@@ -16,7 +15,8 @@ import { LlmGateway, type LlmProviderSelection, type GenerateDispatchResult } fr
 import type { TraceContext } from "../providers/llm-gateway.js";
 import { runMissionCycle } from "./mission-cycle.js";
 import { sendEnvelope, decodeStream } from "./stream-codec.js";
-import type { FhsNode, FhsIdentity, BidCollector } from "./nav-node.js";
+import type { FhsNode, FhsIdentity, BidCollector, ProviderDialer } from "./nav-node.js";
+import { dialProvider } from "./nav-node.js";
 import { makeChatRequestEnvelope, makeHandshakeEnvelope, toolCallToLegacy } from "./p2p-wire.js";
 import { FHS_STREAM_PROTOCOL } from "./fhs-p2p-types.js";
 
@@ -58,13 +58,8 @@ export class P2pLlmGateway extends LlmGateway {
     const { missionId, bid } = result;
 
     // 2. Abrir stream directo al Star asignado
-    const peerAddr = bid.providerMultiaddrs[0];
-    if (!peerAddr) {
-      throw new Error(`P2P: Star ${bid.providerDid} no tiene multiaddrs`);
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
-    const conn = await this.navNode.dial(multiaddr(peerAddr) as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const conn = await dialProvider<any>(this.navNode as ProviderDialer, bid.providerDid, bid.providerMultiaddrs);
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
     const stream = await conn.newStream(FHS_STREAM_PROTOCOL);
 

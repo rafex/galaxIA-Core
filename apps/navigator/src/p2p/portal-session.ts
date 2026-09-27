@@ -113,7 +113,7 @@ export function registerPortalSession(
           data: {
             conversationId: id,
             code: "RUNTIME_ERROR",
-            message: error instanceof Error ? error.message : String(error),
+            message: errorMessage(error),
           },
         });
       });
@@ -176,7 +176,7 @@ export function registerPortalSession(
             try {
               artifacts = await artifactRefsToDataUrls(request.artifacts);
             } catch (error: unknown) {
-              sendError(stream, identity.did, remoteDid, conversationId, "INVALID_ARGUMENTS", error instanceof Error ? error.message : String(error));
+              sendError(stream, identity.did, remoteDid, conversationId, "INVALID_ARGUMENTS", errorMessage(error));
               break;
             }
             if (artifacts.length > 0) {
@@ -206,7 +206,7 @@ export function registerPortalSession(
                     result.error?.message ?? "No se pudo procesar el archivo adjunto.",
                   );
                 }
-              }).catch((error: unknown) => sendError(stream, identity.did, remoteDid, conversationId, "RUNTIME_ERROR", error instanceof Error ? error.message : String(error)));
+              }).catch((error: unknown) => sendError(stream, identity.did, remoteDid, conversationId, "RUNTIME_ERROR", errorMessage(error)));
               break;
             }
             resolveKbAndChat(
