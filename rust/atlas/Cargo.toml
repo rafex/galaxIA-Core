@@ -1,0 +1,19 @@
+[package]
+name = "galaxia-atlas"
+version = "0.1.0"
+edition = "2021"
+description = "Atlas FHS en Rust: bootstrap puro (Kademlia servidor, reenvío GossipSub, mDNS)"
+license = "MIT"
+publish = false
+
+[dependencies]
+galaxia-fhs = { git = "https://github.com/rafex/galaxIA-SDK", branch = "main" }
+axum = "0.8"
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"] }
+libp2p = { version = "0.57", default-features = false }
+mdns-sd = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

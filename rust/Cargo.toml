@@ -1,0 +1,13 @@
+# Servicios de galaxIA-Core en Rust sobre galaxia-fhs (galaxIA-SDK).
+[workspace]
+resolver = "2"
+members = ["atlas"]
+
+# Copia de libp2p-websocket con tls::Config::from_rustls (verificador por pin
+# del certificado del laboratorio). Los [patch] de galaxia-fhs no se heredan.
+[patch.crates-io]
+libp2p-websocket = { git = "https://github.com/rafex/galaxIA-SDK", branch = "main" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -26,7 +26,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { connectToChat, type ApiOptions, type ChatConnection } from "../../src/services/api.js";
 import { diagnostics } from "../../src/services/diagnostics.js";
 import { chunkText } from "../../src/services/local-rag/chunking.js";
-import { createPortalP2pNode, readDhtBeacon } from "../../src/services/p2p-discovery.js";
+import { createPortalP2pNode, discoverNavigator, readDhtBeacon } from "../../src/services/p2p-discovery.js";
 import type { AgentEvent } from "../../src/types/fhs.js";
 
 const NAVIGATOR = process.env.FHS_E2E_NAVIGATOR ?? "";
@@ -134,6 +134,18 @@ describe.skipIf(!NAVIGATOR)("Navigator real con la sesión del Portal", () => {
       await node.stop();
     }
   }, 30_000);
+
+  it.skipIf(!BOOTSTRAP)("descubre al Navigator por GossipSub a través del bootstrap", async () => {
+    // El mismo camino que el navegador: bootstrap → anuncio firmado reenviado
+    // por Atlas → beacon DHT → dial al Navigator.
+    const node = await createPortalP2pNode(await generateKeyPair("Ed25519"));
+    try {
+      const found = await discoverNavigator(node, [BOOTSTRAP], 45_000, diagnostics);
+      expect(found.did).toBe(navigatorDid(NAVIGATOR));
+    } finally {
+      await node.stop();
+    }
+  }, 60_000);
 
   it("responde por streaming con la KB recomendada", async () => {
     session = new Session();

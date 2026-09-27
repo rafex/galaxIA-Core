@@ -1,0 +1,19 @@
+# Atlas FHS en Rust. Contexto: rust/ de galaxIA-Core.
+#   podman build -f rust/Containerfile -t galaxia-atlas-rs rust/
+# galaxia-fhs (galaxIA-SDK, por git) compila el IDL con prost-build: necesita protoc.
+FROM docker.io/library/rust:1.97-bookworm AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends protobuf-compiler \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+ARG COMMIT_HASH=dev
+ENV GALAXIA_COMMIT=$COMMIT_HASH
+COPY . .
+RUN cargo build --release --bin galaxia-atlas
+
+FROM docker.io/library/debian:bookworm-slim
+ARG BUILD_DATE=""
+ENV BUILD_DATE=$BUILD_DATE
+COPY --from=build /src/target/release/galaxia-atlas /usr/local/bin/galaxia-atlas
+EXPOSE 4001 8081
+ENTRYPOINT ["/usr/local/bin/galaxia-atlas"]
