@@ -82,7 +82,8 @@ export function configureSigner(did: string, privateKey: unknown): void {
   signer = { did, privateKey: privateKey as { sign(data: Uint8Array): Uint8Array } };
 }
 
-function envelopePayloadBytes(payload: FhsProto.Envelope["payload"]): Uint8Array {
+/** Bytes Protobuf del payload del Envelope: lo que firma `sealEnvelope` (en hex). */
+export function envelopePayloadBytes(payload: FhsProto.Envelope["payload"]): Uint8Array {
   if (payload.case === undefined) return new Uint8Array();
   const schemas = {
     handshake: FhsProto.HandshakeMessageSchema,
