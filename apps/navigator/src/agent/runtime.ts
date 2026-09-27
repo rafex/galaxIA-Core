@@ -37,6 +37,7 @@ import {
   uploadToIpfs,
 } from "../ipfs/ipfs-client.js";
 import { errorMessage } from "@rafex/galaxia-fhs-node";
+import { KB_MATCH_THRESHOLD, kbMatchScore, kbMatchText } from "./kb-matching.js";
 
 export interface ModelPreferences {
   model?: string;
@@ -528,15 +529,8 @@ export class AgentRuntime {
   }
 
   /**
-   * Umbral mínimo de similitud para considerar una KB "candidata" en el
-   * matching determinístico (SPEC-KB-0002, pregunta abierta #1, DEC-0054) —
-   * mismo valor ya usado por el modo "recomendado" de SPEC-KB-0001, para no
-   * introducir un segundo número arbitrario sin justificación adicional.
-   */
-  private static readonly KB_MATCH_THRESHOLD = 0.05;
-
-  /**
-   * Matching determinístico (Jaccard contra `capability.description`/`tags`,
+   * Matching determinístico (qué fracción de la pregunta aparece en
+   * `capability.description`/`tags`, ver kb-matching.ts; antes Jaccard,
    * DEC-0028) — nunca el LLM decide en este paso. Devuelve las KBs que
    * superan el umbral, mejor puntuada primero, acotadas a `maxCount`
    * (SPEC-KB-0002 paso 4: top-N sobre un umbral, nunca todas las KBs).
@@ -547,14 +541,13 @@ export class AgentRuntime {
     maxCount: number
   ): Promise<Array<{ providerId: string; providerName: string; description: string }>> {
     const kbs = await this.listKbProviders(scope);
-    const questionTokens = tokenizeForMatching(question);
 
     return kbs
       .map((kb) => ({
         ...kb,
-        score: jaccardSimilarity(questionTokens, tokenizeForMatching([kb.description, ...kb.tags].join(" "))),
+        score: kbMatchScore(question, kbMatchText(kb.description, kb.tags)),
       }))
-      .filter((kb) => kb.score > AgentRuntime.KB_MATCH_THRESHOLD)
+      .filter((kb) => kb.score >= KB_MATCH_THRESHOLD)
       .sort((a, b) => b.score - a.score)
       .slice(0, maxCount)
       .map(({ providerId, providerName, description }) => ({ providerId, providerName, description }));
@@ -1043,30 +1036,6 @@ function classifyIntent(content: string): string[] {
   }
 
   return capabilities;
-}
-
-// SPEC-KB-0001: matching determinístico de texto para el modo "recomendado"
-// — mismo mecanismo de similitud (Jaccard) que rag-provider usa para
-// recuperación, reutilizado aquí para decidir qué KB recomendar, nunca cuál
-// invocar (eso lo confirma el usuario).
-function tokenizeForMatching(text: string): Set<string> {
-  return new Set(
-    text
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}\s]/gu, " ")
-      .split(/\s+/)
-      .filter((t) => t.length > 1)
-  );
-}
-
-function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
-  if (a.size === 0 || b.size === 0) return 0;
-  let intersection = 0;
-  for (const token of a) {
-    if (b.has(token)) intersection++;
-  }
-  const union = a.size + b.size - intersection;
-  return union === 0 ? 0 : intersection / union;
 }
 
 // Regla 6 del protocolo (scope de privacidad), implementada de verdad desde
