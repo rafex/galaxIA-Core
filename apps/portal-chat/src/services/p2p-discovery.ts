@@ -315,7 +315,7 @@ export async function decodeSignedNodeAdvertise(bytes: Uint8Array): Promise<FhsP
   return inspected.ok ? inspected.message : null;
 }
 
-async function readDhtBeacon(
+export async function readDhtBeacon(
   node: PortalP2pNode,
   did: string,
   diag: DiagnosticsSink = noopDiagnostics,

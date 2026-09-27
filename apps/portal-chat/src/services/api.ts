@@ -11,7 +11,13 @@ import {
 } from "@rafex/galaxia-fhs-protocol/wire";
 import { FHS_STREAM_PROTOCOL } from "@rafex/galaxia-fhs-protocol/constants";
 import { loadBootstrapAddresses } from "./p2p-config.js";
-import { createPortalP2pNode, discoverNavigator, type P2pStream, type PortalP2pNode } from "./p2p-discovery.js";
+import {
+  createPortalP2pNode,
+  discoverNavigator,
+  type DiscoveredNavigator,
+  type P2pStream,
+  type PortalP2pNode,
+} from "./p2p-discovery.js";
 import { diagnostics, errorText } from "./diagnostics.js";
 
 export interface ApiOptions {
@@ -76,10 +82,20 @@ const HANDSHAKE_TIMEOUT_MS = 10_000;
 
 type P2pPrivateKey = Awaited<ReturnType<typeof generateKeyPair>>;
 
+/**
+ * Solo para pruebas contra un Navigator concreto (`tests/e2e`): saltan
+ * `p2p-config.json` y el descubrimiento. La sesión es la misma del navegador.
+ */
+export interface ChatTransportOverrides {
+  bootstrapAddrs?: string[];
+  discover?: (node: PortalP2pNode, bootstrapAddrs: string[]) => Promise<DiscoveredNavigator>;
+}
+
 export function connectToChat(
   onEvent: (event: AgentEvent) => void,
   onOpen?: () => void,
   onStatus?: (status: ChatConnectionStatus, info?: ChatConnectionStatusInfo) => void,
+  overrides: ChatTransportOverrides = {},
 ): ChatConnection {
   let node: PortalP2pNode | undefined;
   let stream: P2pStream | undefined;
@@ -113,7 +129,7 @@ export function connectToChat(
     await previousNode?.stop().catch(() => undefined);
     let bootstrapAddrs: string[];
     try {
-      bootstrapAddrs = await loadBootstrapAddresses(
+      bootstrapAddrs = overrides.bootstrapAddrs ?? await loadBootstrapAddresses(
         [import.meta.env.VITE_FHS_BOOTSTRAP_ADDRS as string | undefined],
         typeof localStorage === "undefined" ? undefined : localStorage,
         fetch,
@@ -142,7 +158,9 @@ export function connectToChat(
       privateKey = await generateKeyPair("Ed25519");
       sourcePeerId = didFromRaw(privateKey.publicKey.raw);
       node = await createPortalP2pNode(privateKey);
-      const discovered = await discoverNavigator(node, bootstrapAddrs, undefined, diagnostics);
+      const discovered = overrides.discover
+        ? await overrides.discover(node, bootstrapAddrs)
+        : await discoverNavigator(node, bootstrapAddrs, undefined, diagnostics);
       const openedStream = await discovered.connection.newStream(FHS_STREAM_PROTOCOL);
       stream = openedStream;
       diagnostics.record({ stage: "stream", ok: true, message: `Stream ${FHS_STREAM_PROTOCOL} abierto`, target: discovered.multiaddr });
