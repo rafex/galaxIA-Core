@@ -37,7 +37,7 @@ import {
   uploadToIpfs,
 } from "../ipfs/ipfs-client.js";
 import { errorMessage } from "@rafex/galaxia-fhs-node";
-import { KB_MATCH_THRESHOLD, kbMatchScore, kbMatchText } from "./kb-matching.js";
+import { KB_CAPABILITY_IDS, KB_MATCH_THRESHOLD, kbMatchScore, kbMatchText } from "./kb-matching.js";
 
 export interface ModelPreferences {
   model?: string;
@@ -516,7 +516,7 @@ export class AgentRuntime {
     const result: Array<{ providerId: string; providerName: string; description: string; tags: string[] }> = [];
     for (const p of providers) {
       if (scope && !matchesScope(p.service, scope)) continue;
-      const kbCapability = p.service.capabilities.find((c) => c.id === "kb.query");
+      const kbCapability = p.service.capabilities.find((c) => KB_CAPABILITY_IDS.has(c.id));
       if (!kbCapability) continue;
       result.push({
         providerId: p.providerId,
@@ -667,7 +667,7 @@ export class AgentRuntime {
       const loadedTools = await this.mcpHost.loadToolsForCapabilities([
         { providerId: target.providerId, providerName: target.name, service: target.service },
       ]);
-      const kbTool = loadedTools.find((t) => t.capabilityId === "kb.query");
+      const kbTool = loadedTools.find((t) => KB_CAPABILITY_IDS.has(t.capabilityId));
       if (!kbTool) continue;
 
       const startTime = Date.now();

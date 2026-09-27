@@ -10,6 +10,14 @@
 // unión y castiga las descripciones largas. Ahora se mide qué fracción de la
 // pregunta aparece en la descripción.
 
+/**
+ * Capacidad de una base de conocimiento. SPEC-KB-0001 la llama `kb.query`;
+ * los providers P2P (kb-provider de galaxIA-satellite-star, p2p-mcp-host)
+ * anuncian `knowledge.query`. Se aceptan las dos: buscar solo `kb.query`
+ * dejaba vacía la lista de KBs y nunca se recomendaba ninguna.
+ */
+export const KB_CAPABILITY_IDS: ReadonlySet<string> = new Set(["knowledge.query", "kb.query"]);
+
 /** Fracción mínima de palabras de la pregunta que deben aparecer en la KB. */
 export const KB_MATCH_THRESHOLD = 0.2;
 

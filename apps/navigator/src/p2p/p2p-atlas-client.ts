@@ -14,9 +14,20 @@ import type { AtlasClient, ResolvedProvider } from "../atlas-client.js";
 import type { PeerCache, PeerEntry } from "./nav-node.js";
 
 function peerToProvider(peer: PeerEntry, type: "llm" | "mcp"): ResolvedProvider {
+  const identity = peer.beacon.provider;
   const service: PublishedService = {
     endpoint: { url: `p2p://${peer.did}`, protocol: "fhs" },
-    capabilities: peer.capabilities.map((id) => ({ id, type })),
+    // La descripción y las etiquetas del beacon firmado viajan con cada
+    // capacidad. Antes solo se copiaba el id: la recomendación de KB
+    // comparaba la pregunta contra "knowledge.query" y nunca recomendaba nada.
+    capabilities: peer.capabilities.map((id) => ({
+      id,
+      type,
+      description: peer.beacon.capabilities.find((capability) => capability.id === id)?.description
+        || identity?.description
+        || "",
+      tags: identity?.tags ?? [],
+    })),
     models:
       type === "llm"
         ? [
@@ -38,7 +49,8 @@ function peerToProvider(peer: PeerEntry, type: "llm" | "mcp"): ResolvedProvider 
 
   return {
     providerId: peer.did,
-    name: peer.did,
+    // Nombre legible del beacon ("Star FHS Bastion"); el DID sigue en providerId.
+    name: identity?.name || peer.did,
     type,
     service,
   };

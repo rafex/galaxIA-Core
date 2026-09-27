@@ -74,12 +74,14 @@ export class P2pMcpHost extends McpHost {
     toolName: string,
     args: Record<string, unknown>,
     timeoutMs?: number,
-    _trace?: TraceContext
+    trace?: TraceContext
   ): Promise<DispatchResult> {
     const startedAt = Date.now();
 
-    // Inferir capability del toolName (heurística simple: si es extract_text → document.ocr)
-    const capability = guessCapability(toolName);
+    // La capability real viene del beacon (LoadedTool.capabilityId → trace).
+    // Deducirla del nombre fallaba con kb_query y document_index: la misión
+    // pedía una capability que nadie anuncia y ningún provider pujaba.
+    const capability = missionCapability(toolName, trace);
 
     // 1. Ciclo offer/bid/assign
     const result = await runMissionCycle({
@@ -178,10 +180,17 @@ function guessCapability(toolName: string): string {
     extract_text: "document.ocr",
     ocr_extract: "document.ocr",
     document_query: "document.query",
+    document_index: "document.index",
     index_document: "document.index",
+    kb_query: "knowledge.query",
     search_kb: "knowledge.query",
   };
   return mapping[toolName] ?? toolName;
+}
+
+/** Capability que se pide en la misión: la del beacon si se conoce; si no, deducida del nombre. */
+export function missionCapability(toolName: string, trace?: Pick<TraceContext, "capabilityId">): string {
+  return trace?.capabilityId || guessCapability(toolName);
 }
 
 export function advertisedTools(

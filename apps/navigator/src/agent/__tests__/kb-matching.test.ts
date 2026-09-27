@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KB_MATCH_THRESHOLD, contentTokens, kbMatchScore, kbMatchText } from "../kb-matching.js";
+import { KB_CAPABILITY_IDS, KB_MATCH_THRESHOLD, contentTokens, kbMatchScore, kbMatchText } from "../kb-matching.js";
 
 const CONSTITUCION_CORTA = "Constitución Política de los Estados Unidos Mexicanos";
 const CONSTITUCION = `${CONSTITUCION_CORTA}: derechos humanos, educación, soberanía nacional y forma de gobierno (artículos 1, 3, 39 y 40)`;
@@ -46,5 +46,13 @@ describe("recomendación de KB", () => {
 
   it("una pregunta sin palabras con contenido no recomienda nada", () => {
     expect(kbMatchScore("¿qué es?", CONSTITUCION)).toBe(0);
+  });
+});
+
+describe("KB_CAPABILITY_IDS", () => {
+  it("acepta el id de la spec y el que anuncian los providers P2P", () => {
+    expect(KB_CAPABILITY_IDS.has("kb.query")).toBe(true);
+    expect(KB_CAPABILITY_IDS.has("knowledge.query")).toBe(true);
+    expect(KB_CAPABILITY_IDS.has("document.query")).toBe(false);
   });
 });
