@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { KB_CAPABILITY_IDS, KB_MATCH_THRESHOLD, contentTokens, kbMatchScore, kbMatchText } from "../kb-matching.js";
+import { KB_CAPABILITY_IDS, KB_MATCH_THRESHOLD, contentTokens, kbChunksFrom, kbMatchScore, kbMatchText } from "../kb-matching.js";
 
 const CONSTITUCION_CORTA = "Constitución Política de los Estados Unidos Mexicanos";
 const CONSTITUCION = `${CONSTITUCION_CORTA}: derechos humanos, educación, soberanía nacional y forma de gobierno (artículos 1, 3, 39 y 40)`;
@@ -54,5 +54,22 @@ describe("KB_CAPABILITY_IDS", () => {
     expect(KB_CAPABILITY_IDS.has("kb.query")).toBe(true);
     expect(KB_CAPABILITY_IDS.has("knowledge.query")).toBe(true);
     expect(KB_CAPABILITY_IDS.has("document.query")).toBe(false);
+  });
+});
+
+describe("kbChunksFrom", () => {
+  const chunk = { text: "Artículo 3. Toda persona tiene derecho a la educación.", score: 0.4 };
+
+  it("acepta el arreglo que devuelve el kb-provider P2P (E2E-029)", () => {
+    expect(kbChunksFrom(JSON.parse(JSON.stringify([chunk])))).toEqual([chunk]);
+  });
+
+  it("acepta también la forma { chunks }", () => {
+    expect(kbChunksFrom({ chunks: [chunk] })).toEqual([chunk]);
+  });
+
+  it("descarta lo que no es un fragmento con texto", () => {
+    expect(kbChunksFrom([{ text: "  " }, { score: 1 }, null, "x"])).toEqual([]);
+    expect(kbChunksFrom({ error: "boom" })).toEqual([]);
   });
 });

@@ -79,3 +79,19 @@ export function kbMatchScore(question: string, kbText: string): number {
 export function kbMatchText(description: string, tags: string[]): string {
   return [description, ...tags.filter((tag) => !tag.startsWith("tool:"))].join(" ");
 }
+
+/**
+ * Fragmentos de una respuesta de KB. El kb-provider P2P devuelve el arreglo
+ * de fragmentos tal cual; otros providers lo envuelven en `{ chunks }`. Antes
+ * solo se aceptaba `{ chunks }`: con el arreglo, `parsed.chunks` era
+ * undefined y el texto de la KB nunca llegaba al prompt (E2E-029).
+ */
+export function kbChunksFrom<T extends { text: string }>(parsed: unknown): T[] {
+  const list = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === "object" && Array.isArray((parsed as { chunks?: unknown }).chunks)
+      ? (parsed as { chunks: unknown[] }).chunks
+      : [];
+  return list.filter((chunk): chunk is T =>
+    Boolean(chunk) && typeof chunk === "object" && typeof (chunk as { text?: unknown }).text === "string" && (chunk as { text: string }).text.trim() !== "");
+}

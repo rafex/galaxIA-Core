@@ -37,7 +37,7 @@ import {
   uploadToIpfs,
 } from "../ipfs/ipfs-client.js";
 import { errorMessage } from "@rafex/galaxia-fhs-node";
-import { KB_CAPABILITY_IDS, KB_MATCH_THRESHOLD, kbMatchScore, kbMatchText } from "./kb-matching.js";
+import { KB_CAPABILITY_IDS, KB_MATCH_THRESHOLD, kbChunksFrom, kbMatchScore, kbMatchText } from "./kb-matching.js";
 
 export interface ModelPreferences {
   model?: string;
@@ -240,7 +240,15 @@ export class AgentRuntime {
     if (kbProviderIds && kbProviderIds.length > 0) {
       const kbContext = await this.queryMultipleKbs(kbProviderIds, message.content, preferences);
       if (kbContext) {
-        userContent = `[Fragmentos relevantes de la(s) base(s) de conocimiento]\n${kbContext}\n\n${userContent}`;
+        // La KB va justo antes de la pregunta: el usuario la confirmó para
+        // esta pregunta. Antes iba al principio y los fragmentos del documento
+        // de la conversación (aunque no tuvieran relación) quedaban más cerca
+        // de la pregunta y el modelo se apoyaba en ellos.
+        const kbBlock = `[Fragmentos de la base de conocimiento elegida para esta pregunta]\n${kbContext}`;
+        const marker = "\n\n[Pregunta del usuario]\n";
+        userContent = userContent.includes(marker)
+          ? userContent.replace(marker, `\n\n${kbBlock}${marker}`)
+          : `${kbBlock}${marker}${userContent}`;
       }
     }
 
@@ -253,6 +261,8 @@ export class AgentRuntime {
         content:
           "Eres un asistente útil de una red soberana de IA comunitaria. " +
           "Responde siempre en español. " +
+          "Si recibes fragmentos de una base de conocimiento o de documentos, responde con base en los que se " +
+          "relacionan con la pregunta e ignora los que no tengan relación; si ninguno la responde, dilo. " +
           "Si necesitas usar una herramienta, hazlo UNA SOLA VEZ y luego responde con la información obtenida. " +
           "No repitas llamadas a herramientas.",
       },
@@ -658,6 +668,7 @@ export class AgentRuntime {
     const providers = await this.atlasClient.getProviders("mcp");
     const providerNames = new Map<string, string>();
     let anyIndexed = false;
+    const directTexts: string[] = [];
 
     for (const kbProviderId of kbProviderIds) {
       const target = providers.find((p) => p.providerId === kbProviderId);
@@ -679,14 +690,14 @@ export class AgentRuntime {
           preferences.maxWaitMs,
           { conversationId: this.conversationId, capabilityId: kbTool.capabilityId, deviceId: this.deviceId }
         );
-        const parsed = JSON.parse(extractText(result)) as { chunks: KbQueryChunk[] };
+        const chunks = kbChunksFrom<KbQueryChunk>(JSON.parse(extractText(result)));
         this.atlasClient.recordSample({
           providerId: kbTool.providerId,
           capability: kbTool.capabilityId,
           sample: { dispatchMs, totalMs: Date.now() - startTime, success: true, at: Date.now() },
         });
 
-        const citations = (parsed.chunks || []).map((c) => c.citation).filter((c): c is KbCitation => !!c);
+        const citations = chunks.map((c) => c.citation).filter((c): c is KbCitation => !!c);
         this.usedTools.push({
           capability: kbTool.capabilityId,
           providerId: kbTool.providerId,
@@ -695,10 +706,11 @@ export class AgentRuntime {
           citations: citations.length > 0 ? citations : undefined,
         });
 
-        if (parsed.chunks && parsed.chunks.length > 0) {
-          const text = parsed.chunks
+        if (chunks.length > 0) {
+          const text = chunks
             .map((c) => (c.citation ? `[Fuente: ${c.citation.documentTitle}]\n${c.text}` : c.text))
             .join("\n---\n");
+          directTexts.push(`[Fuente: ${target.name}]\n${text}`);
           const indexed = await this.indexDocumentForRag(text, preferences, `kb:${kbProviderId}`);
           if (indexed) anyIndexed = true;
         }
@@ -711,7 +723,10 @@ export class AgentRuntime {
       }
     }
 
-    if (!anyIndexed) return null;
+    // Sin rag-provider para fusionar (o si el indexado falló), los fragmentos
+    // de la KB se usan tal cual: antes se descartaban y el modelo respondía
+    // sin la KB aunque la consulta hubiera funcionado.
+    if (!anyIndexed) return directTexts.length > 0 ? directTexts.join("\n---\n") : null;
 
     // Fusión: una sola consulta sobre el índice combinado (todas las KBs +
     // cualquier documento del usuario ya indexado en esta conversación).
