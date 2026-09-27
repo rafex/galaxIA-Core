@@ -12,7 +12,7 @@ import { createLibp2p } from "libp2p";
 import { webSockets } from "@libp2p/websockets";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
-import { kadDHT } from "@libp2p/kad-dht";
+import { kadDHT, passthroughMapper } from "@libp2p/kad-dht";
 import { gossipsub } from "@libp2p/gossipsub";
 import { identify } from "@libp2p/identify";
 import { ping } from "@libp2p/ping";
@@ -88,6 +88,9 @@ export async function createFhsNode(config: FhsNodeConfig): Promise<FhsNode> {
       ping: ping(),
       dht: kadDHT({
         clientMode: dhtMode === "client",
+        // Sin esto kad-dht descarta las direcciones privadas de la LAN y la
+        // tabla de rutas queda vacía (E2E-032).
+        peerInfoMapper: passthroughMapper,
         // Registrar el namespace FHS para que KadDHT acepte claves /fhs/*
         // ValidateFn: (key, value) => void (lanza si inválido)
         // SelectFn: (key, records) => number (índice del mejor record)

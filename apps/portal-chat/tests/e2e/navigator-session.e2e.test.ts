@@ -5,9 +5,7 @@
  * Se omite salvo que se defina FHS_E2E_NAVIGATOR.
  *
  *   FHS_E2E_NAVIGATOR   multiaddr del Navigator con /p2p/<id> (obligatoria)
- *   FHS_E2E_BOOTSTRAP   multiaddr de Atlas
- *   FHS_E2E_DHT=1       activa la prueba del beacon DHT (hoy falla del lado
- *                       js-libp2p: E2E-032)
+ *   FHS_E2E_BOOTSTRAP   multiaddr de Atlas; activa la prueba del beacon DHT
  *   FHS_E2E_PDF         PDF pequeño con texto; activa las pruebas de adjunto
  *   NODE_EXTRA_CA_CERTS certificado del laboratorio
  *
@@ -34,7 +32,6 @@ import type { AgentEvent } from "../../src/types/fhs.js";
 const NAVIGATOR = process.env.FHS_E2E_NAVIGATOR ?? "";
 const BOOTSTRAP = process.env.FHS_E2E_BOOTSTRAP ?? "";
 const PDF = process.env.FHS_E2E_PDF ?? "";
-const DHT = process.env.FHS_E2E_DHT === "1";
 const TURN_TIMEOUT_MS = 240_000;
 const KB_QUESTION = "¿Qué establece el artículo 3 de la Constitución sobre la educación?";
 
@@ -125,13 +122,10 @@ describe.skipIf(!NAVIGATOR)("Navigator real con la sesión del Portal", () => {
     expect(signatureRejections()).toEqual([]);
   });
 
-  it.skipIf(!BOOTSTRAP || !DHT)("publica un beacon DHT firmado que el Portal acepta", async () => {
+  it.skipIf(!BOOTSTRAP)("publica un beacon DHT firmado que el Portal acepta", async () => {
     const node = await createPortalP2pNode(await generateKeyPair("Ed25519"));
     try {
       await node.dial(multiaddr(BOOTSTRAP));
-      // El Portal consulta el DHT después de recibir el anuncio, cuando
-      // Kademlia ya registró a Atlas; recién conectado su tabla está vacía.
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
       const record = await readDhtBeacon(node, navigatorDid(NAVIGATOR), diagnostics);
       expect(record, "readDhtBeacon descartó o no encontró el registro").not.toBeNull();
       expect(record?.beacon?.provider?.id).toBe("navigator");

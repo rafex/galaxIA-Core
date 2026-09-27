@@ -1,7 +1,7 @@
 import { generateKeyPair, publicKeyFromRaw } from "@libp2p/crypto/keys";
 import { peerIdFromPublicKey } from "@libp2p/peer-id";
 import { gossipsub } from "@libp2p/gossipsub";
-import { kadDHT } from "@libp2p/kad-dht";
+import { kadDHT, passthroughMapper } from "@libp2p/kad-dht";
 import { identify } from "@libp2p/identify";
 import { ping } from "@libp2p/ping";
 import { webSockets } from "@libp2p/websockets";
@@ -85,6 +85,10 @@ export async function createPortalP2pNode(
       ping: ping(),
       dht: kadDHT({
         clientMode: true,
+        // La red FHS vive en direcciones privadas (LAN): el default de kad-dht
+        // las descarta, Atlas nunca entra a la tabla y toda consulta espera
+        // para siempre (E2E-032).
+        peerInfoMapper: passthroughMapper,
         validators: { fhs: () => {} },
         selectors: { fhs: () => 0 },
       }),
