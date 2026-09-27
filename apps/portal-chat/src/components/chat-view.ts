@@ -67,6 +67,8 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   let pendingConversationRagMode: RagMode = "common";
   let pendingConversationRagSource: RagSource = "local";
   let responseStartedAt: number | null = null;
+  let responsePerfStartedAt: number | null = null;
+  let responseTtftMs: number | null = null;
   let responseMessageId: string | null = null;
   let pendingMessageId: string | null = null;
   let chatConnection: ChatConnection | null = null;
@@ -547,6 +549,8 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     pendingConversationRagMode = ragMode;
     pendingConversationRagSource = ragSource;
     responseStartedAt = null;
+    responsePerfStartedAt = null;
+    responseTtftMs = null;
     responseMessageId = null;
     pendingMessageId = null;
     queuedSendOptions = null;
@@ -574,6 +578,8 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     pendingConversationRagMode = selected.ragMode;
     pendingConversationRagSource = selected.ragSource;
     responseStartedAt = null;
+    responsePerfStartedAt = null;
+    responseTtftMs = null;
     responseMessageId = null;
     pendingMessageId = null;
     queuedSendOptions = null;
@@ -889,6 +895,8 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     userMessage.failureMessage = undefined;
     refreshMessageElement(userMessage);
     responseStartedAt = Date.now();
+    responsePerfStartedAt = performance.now();
+    responseTtftMs = null;
     responseMessageId = null;
     pendingMessageId = messageId;
     state.isStreaming = true;
@@ -1027,6 +1035,10 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         addActivityItem("error", `${event.data.name}: ${event.data.error}`);
         break;
       case "assistant.delta":
+        if (responsePerfStartedAt !== null && responseTtftMs === null) {
+          responseTtftMs = Math.max(0, performance.now() - responsePerfStartedAt);
+          addActivityItem("info", `Primer token visible (TTFT Portal): ${responseTtftMs.toFixed(1)} ms`);
+        }
         hideThinking();
         appendAssistantText(event.data.text);
         break;
@@ -1117,6 +1129,8 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         markPendingMessageFailed(event.data.message);
         persistActiveConversation();
         responseStartedAt = null;
+        responsePerfStartedAt = null;
+        responseTtftMs = null;
         pendingMessageId = null;
         state.isStreaming = false;
         sendBtn.disabled = false;
@@ -1360,8 +1374,16 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       assistant.durationMs = responseStartedAt == null ? undefined : Math.max(0, completedAt - responseStartedAt);
       refreshMessageElement(assistant);
     }
+    if (responsePerfStartedAt !== null) {
+      console.info("[fhs-chat-perf]", {
+        ttftMs: responseTtftMs,
+        totalMs: Math.max(0, performance.now() - responsePerfStartedAt),
+      });
+    }
     persistActiveConversation();
     responseStartedAt = null;
+    responsePerfStartedAt = null;
+    responseTtftMs = null;
     responseMessageId = null;
   }
 

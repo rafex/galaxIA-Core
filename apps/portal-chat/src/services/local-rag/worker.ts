@@ -1,6 +1,7 @@
 import { pipeline, type FeatureExtractionPipeline } from "@huggingface/transformers";
 import sqlite3InitModule from "sqlite-wasm-vec";
 import { chunkText, RAG_SCOPE_SEPARATOR, scopeKey } from "./chunking.js";
+import { rankCosineTopK } from "./ranking.js";
 import {
   DEFAULT_CHUNK_OVERLAP,
   DEFAULT_CHUNK_SIZE,
@@ -229,10 +230,18 @@ async function queryIndexedDb(request: LocalRagQuery, key: string, queryVector: 
   const records = request.documentId
     ? await readIndexedDbScope(database, key)
     : await readIndexedDbRagScope(database, request.ragScope);
-  return records.map((record) => ({ record, score: cosine(queryVector, new Float32Array(record.embedding)) }))
-    .sort((left, right) => right.score - left.score)
-    .slice(0, request.topK ?? DEFAULT_TOP_K)
-    .map(({ record, score }) => ({ id: record.id, conversationId: record.conversationId, documentId: record.documentId, filename: record.filename, chunkIndex: record.chunkIndex, text: record.text, score, embeddingModel: record.embeddingModel, embeddingDimensions: record.embeddingDimensions }));
+  const topK = request.topK ?? DEFAULT_TOP_K;
+  const rankingStartedAt = performance.now();
+  const ranked = rankCosineTopK(records, queryVector, (record) => new Float32Array(record.embedding), topK);
+  const rankingMs = performance.now() - rankingStartedAt;
+  console.info("[fhs-local-rag-perf]", {
+    stage: "indexeddb-ranking",
+    candidateCount: records.length,
+    topK,
+    resultCount: ranked.length,
+    rankingMs,
+  });
+  return ranked.map(({ record, score }) => ({ id: record.id, conversationId: record.conversationId, documentId: record.documentId, filename: record.filename, chunkIndex: record.chunkIndex, text: record.text, score, embeddingModel: record.embeddingModel, embeddingDimensions: record.embeddingDimensions }));
 }
 
 async function deleteConversation(conversationId: string): Promise<LocalRagIndexResult> {
@@ -273,18 +282,6 @@ function toArrayBuffer(vector: Float32Array): ArrayBuffer {
   const buffer = new ArrayBuffer(vector.byteLength);
   new Float32Array(buffer).set(vector);
   return buffer;
-}
-
-function cosine(left: Float32Array, right: Float32Array): number {
-  let dot = 0;
-  let leftNorm = 0;
-  let rightNorm = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    dot += (left[index] ?? 0) * (right[index] ?? 0);
-    leftNorm += (left[index] ?? 0) ** 2;
-    rightNorm += (right[index] ?? 0) ** 2;
-  }
-  return leftNorm === 0 || rightNorm === 0 ? 0 : dot / Math.sqrt(leftNorm * rightNorm);
 }
 
 function post(response: LocalRagResponse): void {
