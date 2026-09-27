@@ -488,22 +488,23 @@ export class AgentRuntime {
         preferences.maxWaitMs,
         { conversationId: this.conversationId, capabilityId: queryTool.capabilityId, deviceId: this.deviceId }
       );
-      const parsed = JSON.parse(extractText(result)) as {
-        chunks: Array<{ text: string; score: number; source?: string }>;
-      };
+      // El rag-provider devuelve un arreglo; `{chunks}` se acepta por compatibilidad.
+      const chunks = kbChunksFrom<{ text: string; score: number; source?: string }>(
+        JSON.parse(extractText(result)),
+      );
       this.atlasClient.recordSample({
         providerId: queryTool.providerId,
         capability: queryTool.capabilityId,
         sample: { dispatchMs, totalMs: Date.now() - startTime, success: true, at: Date.now() },
       });
-      if (!parsed.chunks || parsed.chunks.length === 0) return null;
+      if (chunks.length === 0) return null;
 
       this.usedTools.push({
         capability: queryTool.capabilityId,
         ...executedProvider(queryTool, executedBy),
         toolName: queryTool.name,
       });
-      return parsed.chunks
+      return chunks
         .map((c) => {
           const label = c.source ? labelSource?.(c.source) : undefined;
           return label ? `[Fuente: ${label}]\n${c.text}` : c.text;
