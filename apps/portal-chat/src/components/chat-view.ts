@@ -21,6 +21,7 @@ import { applyTheme, cycleTheme, getCurrentTheme, getInitialTheme, themeLabel } 
 import { createDrawerGroup } from "./drawer.js";
 import { createDiagnosticsPanel } from "./diagnostics-panel.js";
 import { diagnostics } from "../services/diagnostics.js";
+import { renderMarkdown } from "../services/markdown.js";
 import { initTooltips, refreshTooltip } from "./tooltip.js";
 import { createTour, hasTourRun, type TourStep } from "./tour.js";
 import { COMMON_RAG_SCOPE, LocalRagStore, type LocalRagChunk } from "../services/local-rag/index.js";
@@ -716,14 +717,17 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
     const body = document.createElement("div");
     body.className = "message-body";
-    body.textContent = message.content;
+    setMessageBody(body, message);
     div.appendChild(body);
 
     const meta = document.createElement("div");
     meta.className = "message-meta";
-    meta.textContent = formatMessageTime(messageTimestamp(message)) +
-      (message.role === "assistant" && message.durationMs != null ? ` · ${formatDuration(message.durationMs)}` : "");
-    meta.title = new Date(messageTimestamp(message)).toLocaleString();
+    const metaText = document.createElement("span");
+    metaText.className = "message-meta-text";
+    metaText.textContent = messageMetaText(message);
+    metaText.title = new Date(messageTimestamp(message)).toLocaleString();
+    meta.appendChild(metaText);
+    if (message.role === "assistant") meta.appendChild(createCopyButton(message.id));
     div.appendChild(meta);
 
     if (message.role === "user" && message.failed) {
@@ -750,13 +754,78 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   function refreshMessageElement(message: ChatMessage) {
     const element = messagesEl.querySelector(`[data-message-id="${message.id}"]`);
     if (!element) return;
-    const body = element.querySelector(".message-body");
-    if (body) body.textContent = message.content;
-    const meta = element.querySelector(".message-meta");
-    if (meta) {
-      meta.textContent = formatMessageTime(messageTimestamp(message)) +
-        (message.role === "assistant" && message.durationMs != null ? ` · ${formatDuration(message.durationMs)}` : "");
+    const body = element.querySelector<HTMLElement>(".message-body");
+    if (body) setMessageBody(body, message);
+    const metaText = element.querySelector(".message-meta-text");
+    if (metaText) metaText.textContent = messageMetaText(message);
+  }
+
+  /**
+   * Las respuestas del asistente se muestran con Markdown (renderMarkdown arma
+   * el DOM nodo por nodo, nunca con innerHTML: el texto viene de un LLM
+   * remoto). Los mensajes del usuario se quedan como texto literal.
+   */
+  function setMessageBody(body: HTMLElement, message: ChatMessage) {
+    if (message.role === "assistant") {
+      body.classList.add("md");
+      body.replaceChildren(renderMarkdown(message.content));
+    } else {
+      body.textContent = message.content;
     }
+  }
+
+  function messageMetaText(message: ChatMessage): string {
+    return formatMessageTime(messageTimestamp(message)) +
+      (message.role === "assistant" && message.durationMs != null ? ` · ${formatDuration(message.durationMs)}` : "");
+  }
+
+  /** Copia el texto original (en Markdown) de la respuesta, para pegarlo en otro lado. */
+  function createCopyButton(messageId: string): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy-btn";
+    button.setAttribute("aria-label", "Copiar respuesta");
+    button.title = "Copiar respuesta (Markdown)";
+    const label = document.createElement("span");
+    label.textContent = "Copiar";
+    button.append(copyIcon(), label);
+    let reset: ReturnType<typeof setTimeout> | undefined;
+    button.addEventListener("click", () => {
+      // Se lee al hacer clic: durante el streaming el contenido sigue creciendo.
+      const content = state.messages.find((message) => message.id === messageId)?.content ?? "";
+      const done = (text: string, ok: boolean) => {
+        label.textContent = text;
+        button.dataset.state = ok ? "ok" : "error";
+        clearTimeout(reset);
+        reset = setTimeout(() => {
+          label.textContent = "Copiar";
+          delete button.dataset.state;
+        }, 1_800);
+      };
+      if (!navigator.clipboard) {
+        done("Sin acceso al portapapeles", false);
+        return;
+      }
+      navigator.clipboard.writeText(content).then(
+        () => done("Copiado", true),
+        () => done("No se pudo copiar", false),
+      );
+    });
+    return button;
+  }
+
+  function copyIcon(): SVGSVGElement {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    const back = document.createElementNS(ns, "rect");
+    back.setAttribute("x", "9"); back.setAttribute("y", "9");
+    back.setAttribute("width", "11"); back.setAttribute("height", "11"); back.setAttribute("rx", "2");
+    const front = document.createElementNS(ns, "path");
+    front.setAttribute("d", "M5 15V5a2 2 0 0 1 2-2h8");
+    svg.append(back, front);
+    return svg;
   }
 
   /** La configuración IPFS es local/build-time; no se consulta por HTTP. */
