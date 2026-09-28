@@ -22,6 +22,7 @@ import { createDrawerGroup } from "./drawer.js";
 import { createDiagnosticsPanel } from "./diagnostics-panel.js";
 import { diagnostics } from "../services/diagnostics.js";
 import { renderMarkdown } from "../services/markdown.js";
+import { IPFS_PRIVACY_WARNING, ipfsGateway, ipfsPreference } from "../services/ipfs-settings.js";
 import { initTooltips, refreshTooltip } from "./tooltip.js";
 import { createTour, hasTourRun, type TourStep } from "./tour.js";
 import { COMMON_RAG_SCOPE, LocalRagStore, type LocalRagChunk } from "../services/local-rag/index.js";
@@ -229,7 +230,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
           Red IPFS:
           <select class="ipfs-network-selector">
             <option value="public" selected>Pública</option>
-            <option value="private">Privada (nodo del operador)</option>
+            <option value="private" disabled>Privada (aún no disponible)</option>
           </select>
         </label>
         <label class="ipfs-retention-row" hidden>
@@ -240,6 +241,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
           </select>
         </label>
         <span class="ipfs-gateway-info" hidden></span>
+        <span class="ipfs-privacy-warning" hidden>⚠️ ${IPFS_PRIVACY_WARNING}</span>
       </footer>
     </div>
     <div class="scrim"></div>
@@ -288,6 +290,8 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   const ipfsRetentionRow = container.querySelector(".ipfs-retention-row") as HTMLElement;
   const ipfsRetentionSelector = container.querySelector(".ipfs-retention-selector") as HTMLSelectElement;
   const ipfsGatewayInfo = container.querySelector(".ipfs-gateway-info") as HTMLElement;
+  const ipfsPrivacyWarning = container.querySelector(".ipfs-privacy-warning") as HTMLElement;
+  const ipfsGatewayUrl = ipfsGateway(import.meta.env.VITE_FHS_IPFS_GATEWAY_URL as string | undefined);
   const provenancePlaceholder = container.querySelector(".provenance-placeholder") as HTMLElement;
 
   const scrimEl = container.querySelector(".scrim") as HTMLElement;
@@ -423,6 +427,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     ipfsNetworkRow.hidden = !state.ipfsEnabled;
     ipfsRetentionRow.hidden = !state.ipfsEnabled;
     ipfsGatewayInfo.hidden = !state.ipfsEnabled;
+    ipfsPrivacyWarning.hidden = !state.ipfsEnabled;
   });
 
   ipfsNetworkSelector.addEventListener("change", () => {
@@ -497,6 +502,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       return;
     }
     pendingAttachment = await fileToBase64(file);
+    if (ipfsPreference(state, ipfsGatewayUrl)) addActivityItem("warning", IPFS_PRIVACY_WARNING);
     pendingAttachmentIsPdf = isPdf;
     pendingAttachmentName = file.name;
     attachBtn.textContent = `${isPdf ? "📄" : "📎"} ${file.name}`;
@@ -836,14 +842,16 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   /** La configuración IPFS es local/build-time; no se consulta por HTTP. */
   function configureIpfsSettings() {
-    const gateway = import.meta.env.VITE_FHS_IPFS_GATEWAY_URL as string | undefined;
     const ipfsOption = ipfsModeSelector.querySelector('option[value="ipfs"]') as HTMLOptionElement;
-    if (!gateway) {
+    if (!ipfsGatewayUrl) {
       ipfsOption.disabled = true;
       ipfsOption.textContent = "Vía IPFS (configuración local no disponible)";
+      // Sin la opción disponible siempre se usa la transmisión directa.
+      ipfsModeSelector.value = "direct";
+      state.ipfsEnabled = false;
       return;
     }
-    ipfsGatewayInfo.textContent = `Gateway público: ${gateway}`;
+    ipfsGatewayInfo.textContent = `Red IPFS pública · lectura para terceros: ${ipfsGatewayUrl}/<CID>`;
   }
 
   async function submitMessage() {
@@ -920,9 +928,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
         kb: state.kbProviderId || undefined,
         kbMaxPerQuestion: state.kbMaxPerQuestion,
         ragSource: ensureHistoryConversation().ragSource,
-        ipfs: state.ipfsEnabled
-          ? { enabled: true, network: state.ipfsNetwork, retention: state.ipfsRetention }
-          : undefined,
+        ipfs: ipfsPreference(state, ipfsGatewayUrl),
       },
     };
 

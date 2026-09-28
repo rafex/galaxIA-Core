@@ -981,6 +981,12 @@ input {
   font-size: 0.8125rem;
 }
 
+.ipfs-privacy-warning {
+  flex-basis: 100%;
+  color: var(--warning);
+  font-size: 0.8rem;
+}
+
 .settings-bar select {
   background: var(--bg);
   color: var(--text);

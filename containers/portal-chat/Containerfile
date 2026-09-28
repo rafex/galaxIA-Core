@@ -7,6 +7,9 @@ WORKDIR /app
 
 ARG COMMIT_HASH=unknown
 ARG BUILD_DATE=unknown
+# Habilita "Vía IPFS" (red pública, DEC-0095). Vacío = solo transmisión directa.
+#   --build-arg VITE_FHS_IPFS_GATEWAY_URL=https://ipfs.io/ipfs
+ARG VITE_FHS_IPFS_GATEWAY_URL=
 
 # fhs-protocol es ahora un paquete npm externo (galaxIA-SDK) — no se copia local
 COPY package*.json ./
@@ -21,6 +24,7 @@ RUN printf '{"commit":"%s","date":"%s"}\n' "$COMMIT_HASH" "$BUILD_DATE" \
       > apps/portal-chat/public/version.json
 
 RUN COMMIT_HASH="$COMMIT_HASH" BUILD_DATE="$BUILD_DATE" \
+    VITE_FHS_IPFS_GATEWAY_URL="$VITE_FHS_IPFS_GATEWAY_URL" \
     npm run build -w apps/portal-chat
 
 FROM docker.io/library/nginx:alpine
