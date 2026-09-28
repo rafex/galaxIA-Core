@@ -7,6 +7,12 @@
  *   FHS_E2E_NAVIGATOR   multiaddr del Navigator con /p2p/<id> (obligatoria)
  *   FHS_E2E_BOOTSTRAP   multiaddr de Atlas; activa la prueba del beacon DHT
  *   FHS_E2E_PDF         PDF pequeño con texto; activa las pruebas de adjunto
+ *   FHS_E2E_NAVIGATOR_STATUS  URL de /status del Navigator; con FHS_E2E_PDF
+ *                       activa la prueba de adjunto vía IPFS público (DEC-0095)
+ *   FHS_E2E_IPFS_RETENTION  ephemeral (default) | reuse
+ *   FHS_E2E_IPFS_EXPECT     release (default): el pin se libera tras la gracia
+ *                       y el barrido; keep: sigue fijado a los 100 s (reuse,
+ *                       o un reinicio del Navigator durante la gracia)
  *   NODE_EXTRA_CA_CERTS certificado del laboratorio
  *
  * Ejemplo (agente en sombra en Bastion, por túnel SSH):
@@ -32,6 +38,9 @@ import type { AgentEvent } from "../../src/types/fhs.js";
 const NAVIGATOR = process.env.FHS_E2E_NAVIGATOR ?? "";
 const BOOTSTRAP = process.env.FHS_E2E_BOOTSTRAP ?? "";
 const PDF = process.env.FHS_E2E_PDF ?? "";
+const NAVIGATOR_STATUS = process.env.FHS_E2E_NAVIGATOR_STATUS ?? "";
+const IPFS_RETENTION = process.env.FHS_E2E_IPFS_RETENTION === "reuse" ? "reuse" : "ephemeral";
+const IPFS_EXPECT = process.env.FHS_E2E_IPFS_EXPECT === "keep" ? "keep" : "release";
 const TURN_TIMEOUT_MS = 240_000;
 const KB_QUESTION = "¿Qué establece el artículo 3 de la Constitución sobre la educación?";
 
@@ -110,6 +119,15 @@ function pdfArtifact(): Pick<ApiOptions, "artifacts" | "attachmentName"> {
   };
 }
 
+type IpfsStatus = { pins: number; pendingUnpins: string[]; degraded: string | null; foreignPins: string[] };
+
+async function ipfsStatus(): Promise<IpfsStatus> {
+  const response = await fetch(NAVIGATOR_STATUS);
+  const body = (await response.json()) as { ipfs: IpfsStatus | null };
+  if (!body.ipfs) throw new Error("el Navigator no tiene IPFS configurado");
+  return body.ipfs;
+}
+
 function signatureRejections(): string[] {
   return diagnostics.list().filter((e) => e.message.includes("firma inválida")).map((e) => e.message);
 }
@@ -170,6 +188,46 @@ describe.skipIf(!NAVIGATOR)("Navigator real con la sesión del Portal", () => {
     const { text, completed } = await session.answer(from, false);
     expect(text.length).toBeGreaterThan(0);
     expect(completed.data.provenance.tools.length).toBeGreaterThan(0);
+  }, TURN_TIMEOUT_MS);
+
+  it.skipIf(!PDF || !NAVIGATOR_STATUS)(`adjunto vía IPFS público (${IPFS_RETENTION}, ${IPFS_EXPECT}): OCR por Kubo y ciclo del pin`, async () => {
+    const before = await ipfsStatus();
+    expect(before.degraded).toBeNull();
+    session = new Session();
+    const from = session.send({
+      message: "¿Qué dice el artículo 1 del documento?",
+      ...pdfArtifact(),
+      preferences: {
+        scope: "community",
+        ragSource: "local",
+        ipfs: { enabled: true, network: "public", retention: IPFS_RETENTION },
+      },
+    });
+    const ocr = await session.next("ocr.extracted", from);
+    expect(ocr.data.text.length).toBeGreaterThan(10);
+
+    // Gracia de 30 s tras un OCR exitoso: el CID sigue fijado.
+    const pinned = await ipfsStatus();
+    expect(pinned.pins).toBeGreaterThan(before.pins);
+
+    if (IPFS_EXPECT === "keep") {
+      await new Promise((resolve) => setTimeout(resolve, 100_000));
+      const kept = await ipfsStatus();
+      expect(kept.pins, "el pin debía seguir fijado").toBeGreaterThan(before.pins);
+      return;
+    }
+
+    // Vence el lease y el siguiente barrido (cada minuto) lo despinea.
+    const deadline = Date.now() + 30_000 + 60_000 + 30_000;
+    let current = pinned;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      current = await ipfsStatus();
+      if (current.pins === before.pins && current.pendingUnpins.length === 0) break;
+    }
+    expect(current.pins, "el pin no se liberó tras la gracia y el barrido").toBe(before.pins);
+    expect(current.pendingUnpins).toEqual([]);
+    expect(current.foreignPins).toEqual([]);
   }, TURN_TIMEOUT_MS);
 
   it.skipIf(!PDF)("adjunto con RAG local: OCR y pregunta con fragmentos del navegador", async () => {
