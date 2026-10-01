@@ -64,6 +64,14 @@ Lee `spec-native/ROADMAP.md` para ver que viene primero.
    next_steps)`.
 7. Al cerrar una iniciativa: `close_initiative(initiative)`.
 
+## Regla del protocolo FHS
+
+> **Ningún documento autoriza despachar una misión sin oferta, puja y asignación.**
+
+Todo despacho Navigator → provider sigue oferta → puja → asignación → stream directo; un
+provider no ejecuta una Mission sin una asignación válida a su DID. Fuente:
+`galaxIA/docs/mission.md` (DEC-0096). Cambiar esto exige una DEC previa.
+
 ## Reglas de contexto
 
 - Los archivos en MAYUSCULAS son contexto para agentes.
