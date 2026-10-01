@@ -49,6 +49,9 @@ interface RetryPayload {
   };
 }
 
+/** Marca con la que el Navigator pide autorización para un comando (ver addKbRecommendedMessage). */
+const COMMAND_AUTH_MARKER = "[autorización /calc] ";
+
 export function createApp(container: HTMLElement, version: string = "unknown") {
   const state: ChatState = {
     messages: [],
@@ -1292,6 +1295,13 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     candidates: Array<{ providerId: string; providerName: string; description: string }>,
     chosenByLlm?: boolean
   ) {
+    // Un comando (/calc) pide autorización expresa por uso: el Navigator reutiliza
+    // kb.recommended y marca el description (deuda: tool.authorization.* del IDL).
+    const commandAuth = candidates[0]?.description.startsWith(COMMAND_AUTH_MARKER);
+    if (commandAuth) {
+      addCommandAuthorizationMessage(convId, candidates[0]);
+      return;
+    }
     const div = document.createElement("div");
     div.className = "message assistant kb-recommendation";
 
@@ -1345,6 +1355,50 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     actions.appendChild(discardBtn);
     div.appendChild(actions);
 
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function addCommandAuthorizationMessage(
+    convId: string,
+    candidate: { providerId: string; providerName: string; description: string }
+  ) {
+    const div = document.createElement("div");
+    div.className = "message assistant kb-recommendation";
+    const title = document.createElement("p");
+    // textContent: nombre y descripción los declara el operador del nodo.
+    const shortDid = `${candidate.providerId.slice(0, 16)}…${candidate.providerId.slice(-6)}`;
+    title.textContent = "🔐 Autorización requerida para usar un nodo de la red";
+    const detail = document.createElement("p");
+    detail.textContent = candidate.description.slice(COMMAND_AUTH_MARKER.length);
+    const node = document.createElement("p");
+    node.textContent = `Nodo: ${candidate.providerName} (${shortDid}). Se publicará una oferta pública solo con la capacidad; la expresión viaja únicamente al nodo asignado. Vence en 60 s.`;
+    div.append(title, detail, node);
+
+    const actions = document.createElement("div");
+    actions.className = "ocr-preview-actions";
+    const allowBtn = document.createElement("button");
+    allowBtn.type = "button";
+    allowBtn.textContent = "Autorizar";
+    const denyBtn = document.createElement("button");
+    denyBtn.type = "button";
+    denyBtn.className = "secondary";
+    denyBtn.textContent = "Rechazar";
+    const decide = (allow: boolean) => {
+      allowBtn.disabled = true;
+      denyBtn.disabled = true;
+      actions.remove();
+      detail.remove();
+      node.remove();
+      title.textContent = allow
+        ? "✓ Autorizaste el uso del nodo para este comando."
+        : "No se envió nada: rechazaste el uso del nodo.";
+      chatConnection?.sendKbDecision(convId, allow);
+    };
+    allowBtn.addEventListener("click", () => decide(true));
+    denyBtn.addEventListener("click", () => decide(false));
+    actions.append(allowBtn, denyBtn);
+    div.appendChild(actions);
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
