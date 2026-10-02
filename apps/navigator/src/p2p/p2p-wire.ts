@@ -120,6 +120,10 @@ export function envelopePayloadBytes(payload: FhsProto.Envelope["payload"]): Uin
     ocrExtracted: FhsProto.OcrExtractedMessageSchema,
     kbRecommended: FhsProto.KbRecommendedMessageSchema,
     kbDecision: FhsProto.KbDecisionMessageSchema,
+    authorizationRequested: FhsProto.AuthorizationRequestedMessageSchema,
+    authorizationDecision: FhsProto.AuthorizationDecisionMessageSchema,
+    authorizationResolved: FhsProto.AuthorizationResolvedMessageSchema,
+    authorizationStatusRequest: FhsProto.AuthorizationStatusRequestMessageSchema,
   } as const;
   const schema = schemas[payload.case];
   if (!schema) throw new TypeError(`FHS payload sin schema protobuf: ${payload.case}`);

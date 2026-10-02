@@ -36,6 +36,7 @@ import {
   unpinFromIpfs,
   uploadToIpfs,
 } from "../ipfs/ipfs-client.js";
+import { AUTHORIZATION_CONFORMANT, NON_CONFORMANT_MESSAGE } from "./conformance.js";
 import { errorMessage } from "@rafex/galaxia-fhs-node";
 import { KB_CAPABILITY_IDS, KB_MATCH_THRESHOLD, kbChunksFrom, kbMatchScore, kbMatchText } from "./kb-matching.js";
 
@@ -139,10 +140,23 @@ export class AgentRuntime {
     documentContext?: DocumentContext,
     documentId?: string,
   ) {
+    if (!AUTHORIZATION_CONFORMANT) {
+      // SPEC-AUTH-0001: sin portón de salida solo viaja el mensaje literal.
+      const sensitive = Boolean(
+        artifacts?.length || preExtractedText || ragActive || kbProviderIds?.length || documentContext?.chunks.length,
+      );
+      if (sensitive) this.emitStatus("classifying", NON_CONFORMANT_MESSAGE);
+      artifacts = undefined;
+      preExtractedText = undefined;
+      ragActive = false;
+      kbProviderIds = undefined;
+      documentContext = undefined;
+      documentId = undefined;
+    }
     this.artifacts = preExtractedText ? [] : artifacts || [];
     this.emitStatus("classifying", "Analizando tu petición...");
 
-    const capabilities = classifyIntent(message.content);
+    const capabilities = AUTHORIZATION_CONFORMANT ? classifyIntent(message.content) : [];
     // Adjuntar un archivo ya expresa la intención de OCR sin ambigüedad —
     // no depender de que el texto del mensaje también contenga palabras
     // clave como "ocr"/"texto"/"imagen" (ver DEC-0020). Si el texto ya viene
@@ -393,6 +407,9 @@ export class AgentRuntime {
     preferences: ModelPreferences,
     emitExtractedEvent = true,
   ): Promise<OcrExtractionResult> {
+    if (!AUTHORIZATION_CONFORMANT) {
+      return { text: null, error: { code: "NON_CONFORMANT", message: NON_CONFORMANT_MESSAGE } };
+    }
     this.artifacts = artifacts;
     this.lastOcrError = undefined;
     const toolProviders = await this.resolveToolProviders(["document.ocr"], preferences.scope);
@@ -437,6 +454,7 @@ export class AgentRuntime {
     source = "user-upload",
     documentId?: string,
   ): Promise<boolean> {
+    if (!AUTHORIZATION_CONFORMANT) return false;
     const toolProviders = await this.resolveToolProviders(["document.index"], preferences.scope);
     const loadedTools = await this.mcpHost.loadToolsForCapabilities(
       toolProviders.map((t) => ({ providerId: t.providerId, providerName: t.providerName, service: t.service }))

@@ -7,6 +7,7 @@
  * serializa como JSON ni los expone por HTTP.
  */
 
+import { AUTHORIZATION_CONFORMANT } from "../agent/conformance.js";
 import { create } from "@bufbuild/protobuf";
 import { errorMessage } from "@rafex/galaxia-fhs-node";
 import {
@@ -126,6 +127,10 @@ export function registerPortalSession(
       documentContext?: FhsProto.DocumentContext,
       documentId?: string,
     ) => {
+      if (!AUTHORIZATION_CONFORMANT) {
+        runChat(id, message, currentPreferences, undefined, undefined);
+        return;
+      }
       if (currentPreferences.kb) {
         runChat(id, message, currentPreferences, documentContext, documentId, undefined, [currentPreferences.kb]);
         return;
