@@ -141,7 +141,7 @@ export class AgentRuntime {
     documentId?: string,
   ) {
     if (!AUTHORIZATION_CONFORMANT) {
-      // SPEC-AUTH-0001: sin portón de salida solo viaja el mensaje literal.
+      // SPEC-AUTHZ-0001: sin portón de salida solo viaja el mensaje literal.
       const sensitive = Boolean(
         artifacts?.length || preExtractedText || ragActive || kbProviderIds?.length || documentContext?.chunks.length,
       );

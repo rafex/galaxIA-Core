@@ -93,7 +93,7 @@ class Session {
   }
 
   /**
-   * Espera la respuesta. Las autorizaciones (SPEC-AUTH-0001) las contesta
+   * Espera la respuesta. Las autorizaciones (SPEC-AUTHZ-0001) las contesta
    * `push` según `allowAll`; `useKb = false` equivale a denegar todas.
    */
   async answer(from: number, useKb: boolean): Promise<{ text: string; completed: Extract<AgentEvent, { type: "assistant.completed" }> }> {

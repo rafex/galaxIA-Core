@@ -1380,7 +1380,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   }
 
   /**
-   * Autorización explícita por uso (SPEC-AUTH-0001): una tarjeta por turno con
+   * Autorización explícita por uso (SPEC-AUTHZ-0001): una tarjeta por turno con
    * un ítem por envío. Nada sale hacia un nodo hasta que se autoriza aquí.
    * Todo texto de nodo (nombre, resumen) entra con textContent.
    */

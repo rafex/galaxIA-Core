@@ -1,5 +1,5 @@
 /**
- * Autorización explícita por uso (SPEC-AUTH-0001): lógica pura de la tarjeta.
+ * Autorización explícita por uso (SPEC-AUTHZ-0001): lógica pura de la tarjeta.
  *
  * Sin DOM ni red: etiquetas legibles, selección con dependencias y decisiones.
  * Los nombres de nodo son autodeclarados y solo se muestran como texto.
