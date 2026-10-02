@@ -42,7 +42,7 @@ const NAVIGATOR_STATUS = process.env.FHS_E2E_NAVIGATOR_STATUS ?? "";
 const IPFS_RETENTION = process.env.FHS_E2E_IPFS_RETENTION === "reuse" ? "reuse" : "ephemeral";
 const IPFS_EXPECT = process.env.FHS_E2E_IPFS_EXPECT === "keep" ? "keep" : "release";
 const TURN_TIMEOUT_MS = 240_000;
-const KB_QUESTION = "¿Qué establece el artículo 3 de la Constitución sobre la educación?";
+const KB_QUESTION = process.env.FHS_E2E_KB_QUESTION ?? "¿Qué es un Satellite en galaxIA y qué hace un Navigator?";
 
 function navigatorDid(address: string): string {
   const peer = multiaddr(address).getComponents().find((c) => c.name === "p2p")?.value ?? "";
@@ -185,6 +185,15 @@ describe.skipIf(!NAVIGATOR)("Navigator real con la sesión del Portal", () => {
     expect(text.length).toBeGreaterThan(20);
     expect(completed.data.provenance.llm.providerId).toMatch(/^did:key:/);
     expect(completed.data.provenance.tools.length).toBeGreaterThan(0);
+  }, TURN_TIMEOUT_MS);
+
+  it("si se deniega la KB no sale nada hacia ella y la respuesta lo dice", async () => {
+    session = new Session();
+    const from = session.send({ message: KB_QUESTION, preferences: { scope: "community", ragSource: "network" } });
+    const { completed } = await session.answer(from, false);
+    const requested = session.events.slice(from).filter((e) => e.type === "authorization.requested");
+    expect(requested.length, "la KB pidió autorización").toBeGreaterThan(0);
+    expect(completed.data.provenance.tools, "ninguna herramienta usada").toHaveLength(0);
   }, TURN_TIMEOUT_MS);
 
   it.skipIf(!PDF)("adjunto con RAG de red: OCR y respuesta sobre el documento", async () => {
