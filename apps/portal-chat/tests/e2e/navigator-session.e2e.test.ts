@@ -187,6 +187,48 @@ describe.skipIf(!NAVIGATOR)("Navigator real con la sesión del Portal", () => {
     expect(completed.data.provenance.tools.length).toBeGreaterThan(0);
   }, TURN_TIMEOUT_MS);
 
+  // ── Comandos autodescubiertos (SPEC-CMD-0001) ─────────────────────────────
+  it("informa los comandos vigentes (commands.available) tras el handshake", async () => {
+    session = new Session();
+    const from = session.send({ message: "/ayuda", preferences: { scope: "community" } });
+    const listed = await session.next("commands.available", 0);
+    expect(listed.data.revision).toBeGreaterThan(0);
+    const { text, completed } = await session.answer(from, true);
+    expect(text).toMatch(/comandos|\/calc/i);
+    expect(completed.data.provenance.llm.providerId, "/ayuda no usa el LLM").toBe("");
+    expect(completed.data.provenance.tools).toHaveLength(0);
+  }, TURN_TIMEOUT_MS);
+
+  it("un comando que ningún nodo ofrece se responde localmente y no llega al LLM", async () => {
+    session = new Session();
+    const from = session.send({ message: "/leer algo", preferences: { scope: "community" } });
+    const { text, completed } = await session.answer(from, true);
+    expect(text).toContain("/leer");
+    expect(text).toMatch(/No hay nodos que ofrezcan/);
+    expect(session.events.slice(from).some((e) => e.type === "authorization.requested"), "no abre tarjeta").toBe(false);
+    expect(completed.data.provenance.llm.providerId, "no usa el LLM").toBe("");
+    expect(completed.data.provenance.tools).toHaveLength(0);
+  }, TURN_TIMEOUT_MS);
+
+  it.skipIf(!process.env.FHS_E2E_CALC)("ejecuta /calc con el nodo que lo declaró y pide autorización", async () => {
+    session = new Session();
+    const from = session.send({ message: "/calc (12+8)*3^2/4", preferences: { scope: "community" } });
+    const { text, completed } = await session.answer(from, true);
+    expect(text).toContain("45");
+    const card = session.events.slice(from).find((e) => e.type === "authorization.requested");
+    expect(card, "abrió la tarjeta de autorización").toBeDefined();
+    expect(completed.data.provenance.llm.providerId).toBe("");
+    expect(completed.data.provenance.tools.length).toBeGreaterThan(0);
+  }, TURN_TIMEOUT_MS);
+
+  it.skipIf(!process.env.FHS_E2E_CALC)("rechazar /calc no ejecuta nada ni envía la expresión", async () => {
+    session = new Session();
+    const from = session.send({ message: "/calc 2+2", preferences: { scope: "community" } });
+    const { text, completed } = await session.answer(from, false);
+    expect(text).toMatch(/No se ejecutó \/calc/);
+    expect(completed.data.provenance.tools).toHaveLength(0);
+  }, TURN_TIMEOUT_MS);
+
   it("si se deniega la KB no sale nada hacia ella y la respuesta lo dice", async () => {
     session = new Session();
     const from = session.send({ message: KB_QUESTION, preferences: { scope: "community", ragSource: "network" } });
