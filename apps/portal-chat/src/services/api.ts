@@ -20,6 +20,7 @@ import {
 } from "./p2p-discovery.js";
 import { diagnostics, errorText } from "./diagnostics.js";
 import type { AuthItemView } from "./authorization.js";
+import type { CommandView } from "./commands.js";
 
 export interface ApiOptions {
   conversationId?: string;
@@ -64,6 +65,8 @@ export interface ChatConnection {
   sendAuthorizationDecision(authorizationId: string, batchDigest: Uint8Array, decisions: Array<{ itemId: string; allow: boolean }>): void;
   /** Tras reconectar: pide el estado de una autorización para no dejarla ambigua. */
   requestAuthorizationStatus(authorizationId: string): void;
+  /** Tras reconectar: pide la lista de comandos vigentes (`commands.available`). */
+  requestCommands(): void;
   reconnect(): void;
   close(): void;
 }
@@ -300,10 +303,25 @@ export function connectToChat(
             sideEffects: item.sideEffects,
             retry: item.retry,
             implicit: item.implicit,
+            toolName: item.toolName,
+            contractFingerprint: item.contractFingerprint,
+            registryDigest: item.registryDigest,
           })),
         } });
         break;
       }
+      case "commandsAvailable":
+        onEvent({ type: "commands.available", data: {
+          revision: Number(envelope.payload.value.revision),
+          commands: envelope.payload.value.commands.map((command): CommandView => ({
+            name: command.name,
+            usage: command.usage,
+            summary: command.summary,
+            nodesCount: command.nodesCount,
+            conflict: command.conflict,
+          })),
+        } });
+        break;
       case "authorizationResolved":
         onEvent({ type: "authorization.resolved", data: {
           authorizationId: envelope.payload.value.authorizationId,
@@ -390,6 +408,9 @@ export function connectToChat(
     },
     requestAuthorizationStatus: (authorizationId: string) => {
       void sendControlEnvelope({ case: "authorizationStatusRequest", value: create(FhsProto.AuthorizationStatusRequestMessageSchema, { authorizationId }) });
+    },
+    requestCommands: () => {
+      void sendControlEnvelope({ case: "commandsListRequest", value: create(FhsProto.CommandsListRequestMessageSchema, {}) });
     },
     reconnect: () => {
       if (closedByCaller) closedByCaller = false;
@@ -480,10 +501,10 @@ function makeHandshake(rawPublicKey: Uint8Array): FhsProto.Envelope {
     payload: {
       case: "handshake",
       value: create(FhsProto.HandshakeMessageSchema, {
-        fhsVersion: "0.1",
+        fhsVersion: "0.2",
         listenAddrs: [],
           beacon: create(FhsProto.BeaconSchema, {
-          fhsVersion: "0.1",
+          fhsVersion: "0.2",
           provider: create(FhsProto.ProviderIdentitySchema, { id: didFromRaw(rawPublicKey), type: FhsProto.ProviderType.MULTI, visibility: FhsProto.Visibility.COMMUNITY, name: "Portal" }),
         }),
       }),
@@ -513,6 +534,8 @@ function encodePayload(payload: FhsProto.Envelope["payload"]): Uint8Array {
     authorizationDecision: FhsProto.AuthorizationDecisionMessageSchema,
     authorizationResolved: FhsProto.AuthorizationResolvedMessageSchema,
     authorizationStatusRequest: FhsProto.AuthorizationStatusRequestMessageSchema,
+    commandsAvailable: FhsProto.CommandsAvailableMessageSchema,
+    commandsListRequest: FhsProto.CommandsListRequestMessageSchema,
     kbDecision: FhsProto.KbDecisionMessageSchema,
     error: FhsProto.ErrorMessageSchema,
     ping: FhsProto.PingMessageSchema,

@@ -21,6 +21,7 @@ import { applyTheme, cycleTheme, getCurrentTheme, getInitialTheme, themeLabel } 
 import { createDrawerGroup } from "./drawer.js";
 import { createDiagnosticsPanel } from "./diagnostics-panel.js";
 import { diagnostics } from "../services/diagnostics.js";
+import { applyCommands, suggest, suggestionLabel, usageFor, type CommandsView, type CommandView } from "../services/commands.js";
 import { renderMarkdown } from "../services/markdown.js";
 import {
   decisionsFor,
@@ -31,6 +32,7 @@ import {
   retentionLabel,
   riskNotes,
   shortDid,
+  shortFingerprint,
   toggleItem,
   trustLabel,
   type AuthRequestView,
@@ -188,6 +190,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       <main class="chat-area">
         <div class="messages"></div>
         <div class="composer">
+          <div class="command-suggestions" role="listbox" aria-label="Comandos disponibles" hidden></div>
           <input type="file" class="file-input" accept="image/*,application/pdf" hidden />
           <button class="attach-btn" type="button" data-tooltip="Adjuntar una imagen o PDF para extraer texto (OCR)">📎</button>
           <textarea placeholder="Escribe un mensaje... (↑/↓ historial)" rows="1"
@@ -285,6 +288,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   const messagesEl = container.querySelector(".messages") as HTMLElement;
   const textareaEl = container.querySelector(".composer textarea") as HTMLTextAreaElement;
   const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+  const commandSuggestionsEl = container.querySelector(".command-suggestions") as HTMLElement;
   const attachBtn = container.querySelector(".attach-btn") as HTMLButtonElement;
   const fileInput = container.querySelector(".file-input") as HTMLInputElement;
   const activityLogEl = container.querySelector(".activity-log") as HTMLElement;
@@ -462,6 +466,19 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       if (navigatePromptHistory("down")) event.preventDefault();
       return;
     }
+    if (event.key === "Tab" && !event.shiftKey && !commandSuggestionsEl.hidden) {
+      const first = suggest(commandsView?.commands ?? [], textareaEl.value)[0];
+      if (first) {
+        event.preventDefault();
+        completeCommand(first);
+        return;
+      }
+    }
+    if (event.key === "Escape" && !commandSuggestionsEl.hidden) {
+      event.preventDefault();
+      hideCommandSuggestions();
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void submitMessage();
@@ -470,6 +487,7 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
 
   textareaEl.addEventListener("input", () => {
     if (!navigatingPromptHistory) resetPromptHistoryNavigation();
+    renderCommandSuggestions();
   });
 
   sendBtn.addEventListener("click", () => void submitMessage());
@@ -872,6 +890,8 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   async function submitMessage() {
     const text = textareaEl.value.trim();
     if ((!text && !pendingAttachment) || state.isStreaming) return;
+    lastSubmittedLine = text;
+    hideCommandSuggestions();
 
     const userContent = text || (pendingAttachment ? (pendingAttachmentIsPdf ? "[PDF adjunto]" : "[imagen adjunta]") : "");
     const createdAt = Date.now();
@@ -1142,6 +1162,10 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       case "authorization.resolved":
         resolveAuthorizationCard(event.data);
         break;
+      case "commands.available":
+        commandsView = applyCommands(commandsView, event.data);
+        renderCommandSuggestions();
+        break;
       case "error":
         hideThinking();
         addActivityItem("error", `[${event.data.code}] ${event.data.message}`);
@@ -1207,6 +1231,9 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       delete diagTriggerBtn.dataset.problem;
       // Tras reconectar, las autorizaciones pendientes se consultan en vez de quedar ambiguas.
       for (const id of authorizationCards.keys()) chatConnection?.requestAuthorizationStatus(id);
+      // Sesión nueva: la lista se repone sin comparar con la revisión anterior.
+      commandsView = null;
+      chatConnection?.requestCommands();
     }
     reconnectBtn.hidden = status === "connected";
     reconnectBtn.disabled = status === "connecting";
@@ -1308,6 +1335,50 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   /** Tarjetas de autorización aún sin resolver, por `authorization_id`. */
   const authorizationCards = new Map<string, { container: HTMLElement; request: AuthRequestView; timer: number }>();
 
+  // ── Comandos autodescubiertos (SPEC-CMD-0001) ────────────────────────────
+  // El Portal no conoce ningún comando: muestra la lista que informa el
+  // Navigator (`commands.available`) para autocompletar. Todo texto de un nodo
+  // se pinta con textContent.
+  let commandsView: CommandsView | null = null;
+  /** Línea que la persona acaba de enviar: la vista previa de la tarjeta sale de aquí. */
+  let lastSubmittedLine = "";
+
+  function hideCommandSuggestions() {
+    commandSuggestionsEl.hidden = true;
+    commandSuggestionsEl.replaceChildren();
+  }
+
+  function completeCommand(command: CommandView) {
+    textareaEl.value = `/${command.name} `;
+    textareaEl.setSelectionRange(textareaEl.value.length, textareaEl.value.length);
+    textareaEl.focus();
+    renderCommandSuggestions();
+  }
+
+  function renderCommandSuggestions() {
+    const commands = commandsView?.commands ?? [];
+    const matches = suggest(commands, textareaEl.value);
+    const usage = matches.length === 0 ? usageFor(commands, textareaEl.value) : undefined;
+    commandSuggestionsEl.replaceChildren();
+    if (usage) {
+      const hint = document.createElement("p");
+      hint.className = "command-usage";
+      hint.textContent = suggestionLabel(usage);
+      commandSuggestionsEl.appendChild(hint);
+    }
+    for (const command of matches) {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "command-option";
+      option.setAttribute("role", "option");
+      option.disabled = command.conflict;
+      option.textContent = suggestionLabel(command);
+      option.addEventListener("click", () => completeCommand(command));
+      commandSuggestionsEl.appendChild(option);
+    }
+    commandSuggestionsEl.hidden = commandSuggestionsEl.childElementCount === 0;
+  }
+
   /**
    * Autorización explícita por uso (SPEC-AUTH-0001): una tarjeta por turno con
    * un ítem por envío. Nada sale hacia un nodo hasta que se autoriza aquí.
@@ -1355,6 +1426,19 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       const detail = document.createElement("p");
       detail.className = "authorization-detail";
       detail.textContent = item.dataSummary;
+      if (item.toolName) {
+        // Comando (SPEC-CMD-0001): contrato fijado y vista previa local de la línea.
+        const contract = document.createElement("p");
+        contract.className = "authorization-detail";
+        contract.textContent = `Herramienta: ${item.toolName} · contrato ${shortFingerprint(item.contractFingerprint)}`;
+        row.appendChild(contract);
+        if (lastSubmittedLine.startsWith("/")) {
+          const preview = document.createElement("p");
+          preview.className = "authorization-detail";
+          preview.textContent = `Tu línea: ${lastSubmittedLine}`;
+          row.appendChild(preview);
+        }
+      }
       const node = document.createElement("p");
       node.className = "authorization-node";
       node.textContent = `Nodo: ${item.providerName || "sin nombre"} (${shortDid(item.providerDid)}) · ${trustLabel(item.trustLevel)} · ${destinationLabel(item.destination)} · retención ${retentionLabel(item.retention)}`;

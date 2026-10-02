@@ -124,6 +124,8 @@ export function envelopePayloadBytes(payload: FhsProto.Envelope["payload"]): Uin
     authorizationDecision: FhsProto.AuthorizationDecisionMessageSchema,
     authorizationResolved: FhsProto.AuthorizationResolvedMessageSchema,
     authorizationStatusRequest: FhsProto.AuthorizationStatusRequestMessageSchema,
+    commandsAvailable: FhsProto.CommandsAvailableMessageSchema,
+    commandsListRequest: FhsProto.CommandsListRequestMessageSchema,
   } as const;
   const schema = schemas[payload.case];
   if (!schema) throw new TypeError(`FHS payload sin schema protobuf: ${payload.case}`);

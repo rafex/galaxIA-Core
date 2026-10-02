@@ -24,6 +24,10 @@ export interface AuthItemView {
   sideEffects: boolean;
   retry: boolean;
   implicit: boolean;
+  /** Solo los comandos (SPEC-CMD-0001); vacíos si el ítem no es un comando. */
+  toolName: string;
+  contractFingerprint: string;
+  registryDigest: string;
 }
 
 export interface AuthRequestView {
@@ -53,11 +57,11 @@ const CAPABILITY_LABELS: Record<string, string> = {
   "knowledge.query": "Consultar una base de conocimiento",
   "document.index": "Indexar el texto en el RAG de la red",
   "document.query": "Buscar en el documento indexado",
-  "math.arithmetic.solve": "Calcular en un nodo",
 };
 
 /** Texto del ítem para la persona: qué se hace y con qué clase de dato. */
 export function itemLabel(item: Pick<AuthItemView, "capabilityId" | "dataClass">): string {
+  if (item.dataClass === FhsProto.AuthorizationDataClass.COMMAND_ARGS) return "Ejecutar un comando en un nodo";
   if (item.capabilityId === "chat") {
     switch (item.dataClass) {
       case FhsProto.AuthorizationDataClass.USER_MESSAGE:
@@ -109,6 +113,11 @@ export function trustLabel(level: string): string {
   if (level === "delegated") return "con delegación del operador";
   if (level === "community") return "comunidad, sin verificar";
   return level || "sin verificar";
+}
+
+/** Huella del contrato de un comando, abreviada para la tarjeta. */
+export function shortFingerprint(fingerprint: string): string {
+  return fingerprint.length > 12 ? fingerprint.slice(0, 12) : fingerprint;
 }
 
 export function shortDid(did: string): string {

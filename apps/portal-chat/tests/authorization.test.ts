@@ -8,6 +8,7 @@ import {
   outcomeLabel,
   riskNotes,
   shortDid,
+  shortFingerprint,
   toggleItem,
   trustLabel,
   type AuthItemView,
@@ -31,6 +32,9 @@ const item = (over: Partial<AuthItemView> = {}): AuthItemView => ({
   sideEffects: false,
   retry: false,
   implicit: false,
+  toolName: "",
+  contractFingerprint: "",
+  registryDigest: "",
   ...over,
 });
 
@@ -72,6 +76,13 @@ describe("tarjeta de autorización", () => {
     expect(trustLabel("community")).toBe("comunidad, sin verificar");
     expect(shortDid("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK")).toBe("did:key:z6MkhaXg…ta2doK");
     expect(shortDid("did:key:z6Mk")).toBe("did:key:z6Mk");
+  });
+
+  it("un comando se describe sin nombrar ninguna capacidad concreta", () => {
+    const command = item({ capabilityId: "math.arithmetic.solve", dataClass: FhsProto.AuthorizationDataClass.COMMAND_ARGS, toolName: "arithmetic_solve" });
+    expect(itemLabel(command)).toBe("Ejecutar un comando en un nodo");
+    expect(shortFingerprint("ab".repeat(32))).toBe("abababababab");
+    expect(shortFingerprint("")).toBe("");
   });
 
   it("avisa de los riesgos que la persona debe ver", () => {

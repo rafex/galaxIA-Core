@@ -818,6 +818,7 @@ input {
 }
 
 .composer {
+  position: relative;
   padding: 0.75rem;
   background: var(--surface);
   border-top: var(--border-width) solid var(--border);
@@ -1503,3 +1504,49 @@ input {
 .authorization-detail, .authorization-node { font-size: 0.8rem; margin: 0.2rem 0 0 1.5rem; opacity: 0.85; word-break: break-word; }
 .authorization-risk { font-size: 0.8rem; margin: 0.2rem 0 0 1.5rem; color: #b45309; }
 .authorization-result li { font-size: 0.85rem; }
+
+/* Comandos autodescubiertos (SPEC-CMD-0001): sugerencias sobre el compositor. */
+.command-suggestions {
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: calc(100% - 0.25rem);
+  display: flex;
+  flex-direction: column;
+  max-height: 14rem;
+  overflow-y: auto;
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  z-index: 5;
+}
+
+.command-suggestions[hidden] {
+  display: none;
+}
+
+.command-option {
+  background: transparent;
+  color: var(--text);
+  border: none;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.command-option:hover:not(:disabled),
+.command-option:focus-visible {
+  background: var(--surface-hover);
+}
+
+.command-option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.command-usage {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  color: var(--text-muted, var(--text));
+}

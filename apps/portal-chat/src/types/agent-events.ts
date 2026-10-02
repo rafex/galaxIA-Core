@@ -2,6 +2,7 @@
 
 import type { KbCitation } from "@rafex/galaxia-fhs-protocol/types";
 import type { AuthRequestView, AuthResolvedView } from "../services/authorization.js";
+import type { CommandsView } from "../services/commands.js";
 
 export interface ProvenanceInfo {
   llm: { providerId: string; providerName: string; model: string };
@@ -26,5 +27,6 @@ export type AgentEvent =
   | { type: "node.online"; data: { providerId: string; providerName: string; services: { kind: string; capabilities: string[] }[] } }
   | { type: "authorization.requested"; data: AuthRequestView }
   | { type: "authorization.resolved"; data: AuthResolvedView }
+  | { type: "commands.available"; data: CommandsView }
   | { type: "provider.failover"; data: { conversationId: string; capability: string; failedProviderId: string; failedProviderName: string; nextProviderId: string; nextProviderName: string } }
   | { type: "error"; data: { conversationId?: string; code: string; message: string } };
