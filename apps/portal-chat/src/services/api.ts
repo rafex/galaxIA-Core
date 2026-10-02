@@ -19,6 +19,7 @@ import {
   type PortalP2pNode,
 } from "./p2p-discovery.js";
 import { diagnostics, errorText } from "./diagnostics.js";
+import type { AuthItemView } from "./authorization.js";
 
 export interface ApiOptions {
   conversationId?: string;
@@ -59,7 +60,10 @@ export interface ApiOptions {
 
 export interface ChatConnection {
   send(options: ApiOptions): void;
-  sendKbDecision(conversationId: string, use: boolean): void;
+  /** Decisión por ítem; `batchDigest` es el que se recibió en la solicitud. */
+  sendAuthorizationDecision(authorizationId: string, batchDigest: Uint8Array, decisions: Array<{ itemId: string; allow: boolean }>): void;
+  /** Tras reconectar: pide el estado de una autorización para no dejarla ambigua. */
+  requestAuthorizationStatus(authorizationId: string): void;
   reconnect(): void;
   close(): void;
 }
@@ -270,11 +274,41 @@ export function connectToChat(
       case "ocrExtracted":
         onEvent({ type: "ocr.extracted", data: { conversationId: envelope.payload.value.missionId, filename: envelope.payload.value.filename, text: envelope.payload.value.text } });
         break;
-      case "kbRecommended":
-        onEvent({ type: "kb.recommended", data: {
-          conversationId: envelope.payload.value.missionId,
-          candidates: envelope.payload.value.candidates.map((candidate) => ({ providerId: candidate.providerId, providerName: candidate.providerName, description: candidate.description })),
-          chosenByLlm: envelope.payload.value.chosenByLlm,
+      case "authorizationRequested": {
+        const request = envelope.payload.value;
+        onEvent({ type: "authorization.requested", data: {
+          authorizationId: request.authorizationId,
+          conversationId: request.conversationId,
+          turnId: request.turnId,
+          expiresAt: Number(request.expiresAt),
+          batchDigest: request.batchDigest,
+          items: request.items.map((item): AuthItemView => ({
+            itemId: item.itemId,
+            capabilityId: item.capabilityId,
+            providerDid: item.providerDid,
+            providerName: item.providerName,
+            trustLevel: item.trustLevel,
+            policyVersion: item.policyVersion,
+            dataClass: item.dataClass,
+            dataSummary: item.dataSummary,
+            destination: item.destination,
+            retention: item.retention,
+            dependsOn: [...item.dependsOn],
+            firstTimeNode: item.firstTimeNode,
+            publicNetwork: item.publicNetwork,
+            failover: item.failover,
+            sideEffects: item.sideEffects,
+            retry: item.retry,
+            implicit: item.implicit,
+          })),
+        } });
+        break;
+      }
+      case "authorizationResolved":
+        onEvent({ type: "authorization.resolved", data: {
+          authorizationId: envelope.payload.value.authorizationId,
+          outcome: envelope.payload.value.outcome,
+          items: envelope.payload.value.items.map((item) => ({ itemId: item.itemId, outcome: item.outcome, reason: item.reason })),
         } });
         break;
       case "error":
@@ -344,8 +378,18 @@ export function connectToChat(
 
   return {
     send,
-    sendKbDecision: (conversationId: string, use: boolean) => {
-      void sendControlEnvelope({ case: "kbDecision", value: create(FhsProto.KbDecisionMessageSchema, { missionId: conversationId, use }) });
+    sendAuthorizationDecision: (authorizationId: string, batchDigest: Uint8Array, decisions: Array<{ itemId: string; allow: boolean }>) => {
+      void sendControlEnvelope({
+        case: "authorizationDecision",
+        value: create(FhsProto.AuthorizationDecisionMessageSchema, {
+          authorizationId,
+          batchDigest,
+          decisions: decisions.map((decision) => create(FhsProto.AuthorizationItemDecisionSchema, decision)),
+        }),
+      });
+    },
+    requestAuthorizationStatus: (authorizationId: string) => {
+      void sendControlEnvelope({ case: "authorizationStatusRequest", value: create(FhsProto.AuthorizationStatusRequestMessageSchema, { authorizationId }) });
     },
     reconnect: () => {
       if (closedByCaller) closedByCaller = false;
@@ -465,6 +509,10 @@ function encodePayload(payload: FhsProto.Envelope["payload"]): Uint8Array {
     assistantCompleted: FhsProto.AssistantCompletedMessageSchema,
     ocrExtracted: FhsProto.OcrExtractedMessageSchema,
     kbRecommended: FhsProto.KbRecommendedMessageSchema,
+    authorizationRequested: FhsProto.AuthorizationRequestedMessageSchema,
+    authorizationDecision: FhsProto.AuthorizationDecisionMessageSchema,
+    authorizationResolved: FhsProto.AuthorizationResolvedMessageSchema,
+    authorizationStatusRequest: FhsProto.AuthorizationStatusRequestMessageSchema,
     kbDecision: FhsProto.KbDecisionMessageSchema,
     error: FhsProto.ErrorMessageSchema,
     ping: FhsProto.PingMessageSchema,

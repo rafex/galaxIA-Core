@@ -1,6 +1,7 @@
 /** Eventos recibidos por la interfaz local. No son parte del protocolo FHS. */
 
 import type { KbCitation } from "@rafex/galaxia-fhs-protocol/types";
+import type { AuthRequestView, AuthResolvedView } from "../services/authorization.js";
 
 export interface ProvenanceInfo {
   llm: { providerId: string; providerName: string; model: string };
@@ -23,6 +24,7 @@ export type AgentEvent =
   | { type: "ocr.extracted"; data: { conversationId: string; filename: string; text: string } }
   | { type: "node.lost"; data: { providerId: string; providerName: string; services: { kind: string; capabilities: string[] }[] } }
   | { type: "node.online"; data: { providerId: string; providerName: string; services: { kind: string; capabilities: string[] }[] } }
-  | { type: "kb.recommended"; data: { conversationId: string; candidates: Array<{ providerId: string; providerName: string; description: string }>; chosenByLlm?: boolean } }
+  | { type: "authorization.requested"; data: AuthRequestView }
+  | { type: "authorization.resolved"; data: AuthResolvedView }
   | { type: "provider.failover"; data: { conversationId: string; capability: string; failedProviderId: string; failedProviderName: string; nextProviderId: string; nextProviderName: string } }
   | { type: "error"; data: { conversationId?: string; code: string; message: string } };

@@ -22,6 +22,20 @@ import { createDrawerGroup } from "./drawer.js";
 import { createDiagnosticsPanel } from "./diagnostics-panel.js";
 import { diagnostics } from "../services/diagnostics.js";
 import { renderMarkdown } from "../services/markdown.js";
+import {
+  decisionsFor,
+  destinationLabel,
+  isFinal,
+  itemLabel,
+  outcomeLabel,
+  retentionLabel,
+  riskNotes,
+  shortDid,
+  toggleItem,
+  trustLabel,
+  type AuthRequestView,
+  type AuthResolvedView,
+} from "../services/authorization.js";
 import { IPFS_PRIVACY_WARNING, ipfsGateway, ipfsPreference } from "../services/ipfs-settings.js";
 import { initTooltips, refreshTooltip } from "./tooltip.js";
 import { createTour, hasTourRun, type TourStep } from "./tour.js";
@@ -49,8 +63,6 @@ interface RetryPayload {
   };
 }
 
-/** Marca con la que el Navigator pide autorización para un comando (ver addKbRecommendedMessage). */
-const COMMAND_AUTH_MARKER = "[autorización /calc] ";
 
 export function createApp(container: HTMLElement, version: string = "unknown") {
   const state: ChatState = {
@@ -1123,13 +1135,12 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
       case "node.online":
         addActivityItem("success", `Nodo disponible: ${event.data.providerName}`);
         break;
-      case "kb.recommended":
+      case "authorization.requested":
         hideThinking();
-        addKbRecommendedMessage(event.data.conversationId, event.data.candidates, event.data.chosenByLlm);
-        if (pendingMessageId) retryPayloads.delete(pendingMessageId);
-        pendingMessageId = null;
-        state.isStreaming = false;
-        sendBtn.disabled = false;
+        addAuthorizationCard(event.data);
+        break;
+      case "authorization.resolved":
+        resolveAuthorizationCard(event.data);
         break;
       case "error":
         hideThinking();
@@ -1192,7 +1203,11 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     statusDotEl.dataset.status = status;
     connectionLabelEl.textContent = labels[status];
     connectionLabelEl.title = reason ? `${reason}\n(clic para ver el diagnóstico)` : "Clic para ver el diagnóstico de red";
-    if (status === "connected") delete diagTriggerBtn.dataset.problem;
+    if (status === "connected") {
+      delete diagTriggerBtn.dataset.problem;
+      // Tras reconectar, las autorizaciones pendientes se consultan en vez de quedar ambiguas.
+      for (const id of authorizationCards.keys()) chatConnection?.requestAuthorizationStatus(id);
+    }
     reconnectBtn.hidden = status === "connected";
     reconnectBtn.disabled = status === "connecting";
     reconnectBtn.title = status === "connecting" ? "Conectando con la red P2P…" : "Reconectar este chat a la red P2P";
@@ -1290,116 +1305,147 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
-  function addKbRecommendedMessage(
-    convId: string,
-    candidates: Array<{ providerId: string; providerName: string; description: string }>,
-    chosenByLlm?: boolean
-  ) {
-    // Un comando (/calc) pide autorización expresa por uso: el Navigator reutiliza
-    // kb.recommended y marca el description (deuda: tool.authorization.* del IDL).
-    const commandAuth = candidates[0]?.description.startsWith(COMMAND_AUTH_MARKER);
-    if (commandAuth) {
-      addCommandAuthorizationMessage(convId, candidates[0]);
-      return;
-    }
-    const div = document.createElement("div");
-    div.className = "message assistant kb-recommendation";
+  /** Tarjetas de autorización aún sin resolver, por `authorization_id`. */
+  const authorizationCards = new Map<string, { container: HTMLElement; request: AuthRequestView; timer: number }>();
 
-    const question = document.createElement("p");
-    const names = candidates.map((c) => c.providerName).join(", ");
-    const intro =
-      candidates.length > 1
-        ? `📚 Encontré ${candidates.length} bases de conocimiento relevantes: `
-        : "📚 Encontré una base de conocimiento relevante: ";
-    // textContent (no innerHTML) — providerName/description son autodeclarados
-    // por el operador de cada nodo (DEC-0028), no se confía en que vengan
-    // sanitizados (mismo cuidado ya aplicado a KbCitation, DEC-0049).
-    question.textContent =
-      intro +
-      names +
-      (chosenByLlm ? " (elegida por el modelo, sin coincidencia determinística clara)." : ".") +
-      " ¿Las uso para responder?";
-    div.appendChild(question);
+  /**
+   * Autorización explícita por uso (SPEC-AUTH-0001): una tarjeta por turno con
+   * un ítem por envío. Nada sale hacia un nodo hasta que se autoriza aquí.
+   * Todo texto de nodo (nombre, resumen) entra con textContent.
+   */
+  function addAuthorizationCard(request: AuthRequestView) {
+    const container = document.createElement("div");
+    container.className = "message assistant authorization-card";
+    container.setAttribute("role", "group");
+    container.setAttribute("aria-label", "Autorización requerida para enviar contenido a otros nodos");
 
-    const list = document.createElement("ul");
-    for (const c of candidates) {
-      const item = document.createElement("li");
-      item.textContent = `${c.providerName} — ${c.description}`;
-      list.appendChild(item);
-    }
-    div.appendChild(list);
-
-    const actions = document.createElement("div");
-    actions.className = "ocr-preview-actions";
-
-    const useBtn = document.createElement("button");
-    useBtn.type = "button";
-    useBtn.textContent = candidates.length > 1 ? "Usar estas KBs" : "Usar esta KB";
-    const discardBtn = document.createElement("button");
-    discardBtn.type = "button";
-    discardBtn.className = "secondary";
-    discardBtn.textContent = "No usar";
-
-    const decide = (use: boolean) => {
-      useBtn.disabled = true;
-      discardBtn.disabled = true;
-      actions.remove();
-      question.textContent = use ? `✓ Usando "${names}" para responder.` : "No se usó ninguna KB para esta pregunta.";
-      list.remove();
-      chatConnection?.sendKbDecision(convId, use);
-    };
-
-    useBtn.addEventListener("click", () => decide(true));
-    discardBtn.addEventListener("click", () => decide(false));
-    actions.appendChild(useBtn);
-    actions.appendChild(discardBtn);
-    div.appendChild(actions);
-
-    messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-  }
-
-  function addCommandAuthorizationMessage(
-    convId: string,
-    candidate: { providerId: string; providerName: string; description: string }
-  ) {
-    const div = document.createElement("div");
-    div.className = "message assistant kb-recommendation";
     const title = document.createElement("p");
-    // textContent: nombre y descripción los declara el operador del nodo.
-    const shortDid = `${candidate.providerId.slice(0, 16)}…${candidate.providerId.slice(-6)}`;
-    title.textContent = "🔐 Autorización requerida para usar un nodo de la red";
-    const detail = document.createElement("p");
-    detail.textContent = candidate.description.slice(COMMAND_AUTH_MARKER.length);
-    const node = document.createElement("p");
-    node.textContent = `Nodo: ${candidate.providerName} (${shortDid}). Se publicará una oferta pública solo con la capacidad; la expresión viaja únicamente al nodo asignado. Vence en 60 s.`;
-    div.append(title, detail, node);
+    title.className = "authorization-title";
+    title.textContent = "🔐 Autorización requerida";
+    const lead = document.createElement("p");
+    lead.className = "authorization-lead";
+    lead.textContent = "Antes de enviar contenido a otro nodo necesito tu permiso. Nada sale si no autorizas.";
+    container.append(title, lead);
+
+    let selected = new Set(request.items.map((item) => item.itemId));
+    const list = document.createElement("ul");
+    list.className = "authorization-items";
+    const checkboxes = new Map<string, HTMLInputElement>();
+    const syncCheckboxes = () => {
+      for (const [id, box] of checkboxes) box.checked = selected.has(id);
+      allowBtn.disabled = selected.size === 0;
+    };
+    for (const item of request.items) {
+      const row = document.createElement("li");
+      row.className = "authorization-item";
+      const label = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = true;
+      box.addEventListener("change", () => {
+        selected = toggleItem(request.items, selected, item.itemId, box.checked);
+        syncCheckboxes();
+      });
+      checkboxes.set(item.itemId, box);
+      const heading = document.createElement("strong");
+      heading.textContent = itemLabel(item);
+      label.append(box, " ", heading);
+      row.appendChild(label);
+
+      const detail = document.createElement("p");
+      detail.className = "authorization-detail";
+      detail.textContent = item.dataSummary;
+      const node = document.createElement("p");
+      node.className = "authorization-node";
+      node.textContent = `Nodo: ${item.providerName || "sin nombre"} (${shortDid(item.providerDid)}) · ${trustLabel(item.trustLevel)} · ${destinationLabel(item.destination)} · retención ${retentionLabel(item.retention)}`;
+      row.append(detail, node);
+      for (const note of riskNotes(item)) {
+        const warn = document.createElement("p");
+        warn.className = "authorization-risk";
+        warn.textContent = `⚠️ ${note}`;
+        row.appendChild(warn);
+      }
+      if (item.dependsOn.length > 0) {
+        const dep = document.createElement("p");
+        dep.className = "authorization-detail";
+        dep.textContent = "Depende de otro ítem de esta solicitud.";
+        row.appendChild(dep);
+      }
+      list.appendChild(row);
+    }
+    container.appendChild(list);
+
+    const countdown = document.createElement("p");
+    countdown.className = "authorization-countdown";
+    countdown.setAttribute("aria-live", "polite");
+    container.appendChild(countdown);
 
     const actions = document.createElement("div");
     actions.className = "ocr-preview-actions";
     const allowBtn = document.createElement("button");
     allowBtn.type = "button";
-    allowBtn.textContent = "Autorizar";
+    allowBtn.textContent = "Autorizar lo seleccionado";
     const denyBtn = document.createElement("button");
     denyBtn.type = "button";
     denyBtn.className = "secondary";
-    denyBtn.textContent = "Rechazar";
+    denyBtn.textContent = "Rechazar todo";
+    actions.append(allowBtn, denyBtn);
+    container.appendChild(actions);
+
+    const deadline = Date.now() + Math.max(1_000, Math.min(request.expiresAt - Date.now(), 120_000) || 60_000);
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1_000));
+      countdown.textContent = left > 0 ? `Vence en ${left} s; si no respondes, no se envía nada.` : "Venció; no se envió nada.";
+      if (left === 0) {
+        allowBtn.disabled = true;
+        denyBtn.disabled = true;
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 1_000);
+
     const decide = (allow: boolean) => {
       allowBtn.disabled = true;
       denyBtn.disabled = true;
-      actions.remove();
-      detail.remove();
-      node.remove();
-      title.textContent = allow
-        ? "✓ Autorizaste el uso del nodo para este comando."
-        : "No se envió nada: rechazaste el uso del nodo.";
-      chatConnection?.sendKbDecision(convId, allow);
+      for (const box of checkboxes.values()) box.disabled = true;
+      const chosen = allow ? selected : new Set<string>();
+      countdown.textContent = "Enviando tu decisión…";
+      chatConnection?.sendAuthorizationDecision(request.authorizationId, request.batchDigest, decisionsFor(request.items, chosen));
     };
     allowBtn.addEventListener("click", () => decide(true));
     denyBtn.addEventListener("click", () => decide(false));
-    actions.append(allowBtn, denyBtn);
-    div.appendChild(actions);
-    messagesEl.appendChild(div);
+
+    authorizationCards.set(request.authorizationId, { container, request, timer });
+    messagesEl.appendChild(container);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    allowBtn.focus();
+  }
+
+  /** El Navigator informa el resultado por ítem: reemplaza los botones. */
+  function resolveAuthorizationCard(resolved: AuthResolvedView) {
+    const entry = authorizationCards.get(resolved.authorizationId);
+    if (!isFinal(resolved.outcome)) return;
+    let container = entry?.container;
+    if (!container) {
+      container = document.createElement("div");
+      container.className = "message assistant authorization-card";
+      messagesEl.appendChild(container);
+    }
+    if (entry) window.clearInterval(entry.timer);
+    authorizationCards.delete(resolved.authorizationId);
+    container.querySelector(".ocr-preview-actions")?.remove();
+    container.querySelector(".authorization-countdown")?.remove();
+    container.querySelector(".authorization-lead")?.remove();
+    const names = new Map(entry?.request.items.map((item) => [item.itemId, itemLabel(item)]));
+    const summary = document.createElement("ul");
+    summary.className = "authorization-result";
+    for (const item of resolved.items) {
+      const row = document.createElement("li");
+      row.textContent = `${names.get(item.itemId) ?? item.itemId}: ${outcomeLabel(item.outcome)}${item.reason ? ` (${item.reason})` : ""}`;
+      summary.appendChild(row);
+    }
+    container.querySelector(".authorization-items")?.replaceWith(summary);
+    if (!container.contains(summary)) container.appendChild(summary);
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
@@ -1476,8 +1522,12 @@ export function createApp(container: HTMLElement, version: string = "unknown") {
   function renderProvenance(provenance: ProvenanceInfo) {
     provenancePlaceholder.innerHTML = `
       <dl>
-        <dt>Modelo</dt><dd>${escapeHtml(provenance.llm.model)}</dd>
-        <dt>Razonamiento</dt><dd>${escapeHtml(provenance.llm.providerName)}</dd>
+        ${
+          provenance.llm.providerId
+            ? `<dt>Modelo</dt><dd>${escapeHtml(provenance.llm.model)}</dd>
+        <dt>Razonamiento</dt><dd>${escapeHtml(provenance.llm.providerName)}</dd>`
+            : "<dt>Modelo</dt><dd>Ninguno: resultado determinista, sin modelo de lenguaje</dd>"
+        }
         ${provenance.tools
           .map(
             (tool) => `

@@ -92,21 +92,32 @@ class Session {
     }
   }
 
-  /** Contesta la recomendación de KB (si llega) y espera la respuesta. */
+  /**
+   * Espera la respuesta. Las autorizaciones (SPEC-AUTH-0001) las contesta
+   * `push` según `allowAll`; `useKb = false` equivale a denegar todas.
+   */
   async answer(from: number, useKb: boolean): Promise<{ text: string; completed: Extract<AgentEvent, { type: "assistant.completed" }> }> {
-    const kb = await Promise.race([
-      this.next("kb.recommended", from).then((e) => e, () => null),
-      this.next("assistant.completed", from).then(() => null, () => null),
-    ]);
-    if (kb) this.chat.sendKbDecision(kb.data.conversationId, useKb);
+    this.allowAll = useKb;
     const completed = await this.next("assistant.completed", from);
+    this.allowAll = true;
     const text = this.events.slice(from)
       .flatMap((e) => (e.type === "assistant.delta" ? [e.data.text] : []))
       .join("");
     return { text, completed };
   }
 
+  /** Política de la prueba: autoriza (o deniega) cada solicitud al llegar. */
+  allowAll = true;
+
   private push(event: AgentEvent): void {
+    if (event.type === "authorization.requested") {
+      const allow = this.allowAll;
+      this.chat.sendAuthorizationDecision(
+        event.data.authorizationId,
+        event.data.batchDigest,
+        event.data.items.map((item) => ({ itemId: item.itemId, allow })),
+      );
+    }
     this.events.push(event);
     for (const wake of this.waiters) wake();
   }
